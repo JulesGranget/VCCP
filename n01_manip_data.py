@@ -1097,7 +1097,6 @@ def extract_tdt(reader):
     return data_allseg, srate_allseg, chanlist_allseg, trig_allseg
 
 
-len(chanlist_allseg[0][10]).keys()
 
 
 
@@ -1118,12 +1117,6 @@ if __name__ == '__main__':
 
     preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srate_sl)
 
-
-
-
-
-  git config --global user.email "you@example.com"
-  git config --global user.name "Your Name"
 
 
 
