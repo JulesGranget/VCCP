@@ -1,36 +1,17 @@
 
 
 
-from n00_config_params import *
-from n00bis_config_analysis_functions import *
-
-
-#### BLOCK ORDER
-patient_block_order = {'NS217' : ['AoRoCo', 'A+RoCo', 
-                                  'AoRoCo', 'AoR-Co', 'AoR-Co', 'AoR-Co',
-                                  'A+RoCc', 'A+R-Cc', 'A+R-Cc', 'A+RoCc', 'A+R-Cc',
-                                  'A+RoC-', 'A+R-C-', 'A+R-C-']}
-
-
-
-
-
+from A_config.n01_O_config_params import *
+from A_config.n02_O_config_analysis_functions import *
 
 
 
 #### TRIG DICT
-trig_dict_allpatient = {   'NS217' : {
-                'AoRoCo01' : [int(106212), int(118539)], 'A+RoCo00' : [int(130276), int(140631)], 
-                'AoRoCo02' : [int(148047), int(160182)], 'AoR-Co01' : [int(215542), int(223640)], 'AoR-Co02' : [int(234101), int(246452)], 'AoR-Co03' : [int(252129), int(264546)], 
-                'A+RoCc01' : [int(270372), int(282718)], 'A+R-Cc01' : [int(291832), int(304402)], 'A+R-Cc02' : [int(336897), int(348886)], 'A+RoCc02' : [int(357287), int(369303)], 'A+R-Cc03' : [int(382814), int(394845)],
-                'A+RoC-01' : [int(415978), int(428044)], 'A+R-C-01' : [int(436847), int(448950)], 'A+R-C-02' : [int(460005), int(472243)]}
-                
-            }
+ntrail_dict_allpatient = {   'LH018' : {'RB' : 1, 'HV' : 1, 'AoRoCo': 1, 'AoR-Co': 3, 'A+RoCc': 2, 'A+R-Cc': 3, 'A+RoC-': 2, 'A+R-C-': 3},
+                        }
 
-
-
-
-
+ntrail_dict_allpatient_pilote = {   'NS217' : {'AoRoCo': 2, 'AoR-Co': 3, 'A+RoCc': 2, 'A+R-Cc': 3, 'A+RoC-': 1, 'A+R-C-': 2},
+                        }
 
 
 
@@ -56,19 +37,23 @@ trig_dict_pilote = {'jules' :
                     #pilote 1
                     {'AoRoCo' : [int(41403), int(59933)], 'AoR-Co01' : [int(114820), int(133687)], 'AoR-Co02' : [int(135718), int(154151)], 
                     'A+RoCc' : [int(155936), int(174080)], 'A+R-Cc01' : [int(175920), int(194345)], 'A+R-Cc02' : [int(195225), int(215060)], 
-                    'A+RoC-' : [int(267012), int(285473)], 'A+R-C-01' : [int(287389), int(306136)], 'A+R-C-02' : [int(307220), int(325884)]}
+                    'A+RoC-' : [int(267012), int(285473)], 'A+R-C-01' : [int(287389), int(306136)], 'A+R-C-02' : [int(307220), int(325884)]},
+
+                    'test_aaron_params' :
+        
+                    #pilote 1
+                    {'AoRoCo' : [int(0), int(59000)]},
+
+                    'nose_mouth' :
+
+                    {'new_nose' : {'AoRo' : [int(9.5e2), int(1.934e4)], 'AoR-' : [int(2.076e4), int(3.904e4)], 'A+Ro' : [int(4.011e4), int(5.834e4)]}, 
+        
+                    'old_nose' : {'AoRo' : [int(6.275e4), int(8.086e4)], 'AoR-' : [int(8.172e4), int(1.007e5)], 'A+Ro' : [int(1.0132e5), int(1.201e5)]},
+        
+                    'mouth' : {'AoRo' : [int(1.3516e5), int(1.5410e5)], 'AoR-' : [int(1.5581e5), int(1.7426e5)], 'A+Ro' : [int(1.7602e5), int(1.946e5)]}},
         
                     }
 
-
-
-
-
-
-
-
-#### DATA FILE NAME
-datafile_name_allsujet = {'NS217' : {'B' : 'FirstDeriv_Neural-251110-120653_VCCP_NS217_B30_B3', 'P' : 'FirstDeriv_Neural-251110-120653_VCCP_NS217_B30_P1'}}
 
 
 

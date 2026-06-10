@@ -24,365 +24,10 @@ import seaborn as sns
 
 import neurokit2 as nk
 
-from n00_config_params import *
+from A_config.n01_O_config_params import *
 
 
 debug = False
-
-
-
-
-########################################
-######## SURFACE LAPLACIAN ########
-########################################
-
-
-#raw, leg_order, m, smoothing = raw, 4, 50, 1e-5
-def surface_laplacian(raw, leg_order, m, smoothing):
-    """
-    This function attempts to compute the surface laplacian transform to an mne Epochs object. The 
-    algorithm follows the formulations of Perrin et al. (1989) and it consists for the most part in a 
-    nearly-literal translation of Mike X Cohen's 'Analyzing neural time series data' corresponding MATLAB 
-    code (2014).
-    
-    INPUTS are:
-        - raw: raw mne object with  data(chan,sig)
-        - leg_order: maximum order of the Legendre polynomial
-        - m: smothness parameter for G and H
-        - smoothing: smothness parameter for the diagonal of G
-        - montage: montage to reconstruct the transformed Epochs object (same as in raw data import)
-        
-    OUTPUTS are:
-        - raw_lap: surface laplacian transform of the original raw object
-        
-    References:
-        - Perrin, F., Pernier, J., Bertrand, O. & Echallier, J.F. (1989). Spherical splines for scalp 
-          potential and current density mapping. Electroencephalography and clinical Neurophysiology, 72, 
-          184-187.
-        - Cohen, M.X. (2014). Surface Laplacian In Analyzing neural time series data: theory and practice 
-          (pp. 275-290). London, England: The MIT Press.
-    """
-    # import libraries
-    import numpy as np
-    from scipy import special
-    import math
-    import mne
-    
-    # get electrodes positions
-    locs = raw._get_channel_positions()
-
-    x = locs[:,0]
-    y = locs[:,1]
-    z = locs[:,2]
-
-    # arrange data
-    data = raw.get_data() # data
-    orig_data_size = np.squeeze(data.shape)
-
-    numelectrodes = len(x)
-    
-    # normalize cartesian coordenates to sphere unit
-    def cart2sph(x, y, z):
-        hxy = np.hypot(x, y)
-        r = np.hypot(hxy, z)
-        el = np.arctan2(z, hxy)
-        az = np.arctan2(y, x)
-        return az, el, r
-
-    junk1, junk2, spherical_radii = cart2sph(x,y,z)
-    maxrad = np.max(spherical_radii)
-    x = x/maxrad
-    y = y/maxrad
-    z = z/maxrad
-    
-    # compute cousine distance between all pairs of electrodes
-    cosdist = np.zeros((numelectrodes, numelectrodes))
-    for i in range(numelectrodes):
-        for j in range(i+1,numelectrodes):
-            cosdist[i,j] = 1 - (((x[i] - x[j])**2 + (y[i] - y[j])**2 + (z[i] - z[j])**2)/2)
-
-    cosdist = cosdist + cosdist.T + np.identity(numelectrodes)
-
-    # get legendre polynomials
-    legpoly = np.zeros((leg_order, numelectrodes, numelectrodes))
-    for ni in range(leg_order):
-        for i in range(numelectrodes):
-            for j in range(i+1, numelectrodes):
-                #temp = special.lpn(8,cosdist[0,1])[0][8]
-                legpoly[ni,i,j] = special.lpn(ni+1,cosdist[i,j])[0][ni+1]
-
-    legpoly = legpoly + np.transpose(legpoly,(0,2,1))
-
-    for i in range(leg_order):
-        legpoly[i,:,:] = legpoly[i,:,:] + np.identity(numelectrodes)
-
-    # compute G and H matrixes
-    twoN1 = np.multiply(2, range(1, leg_order+1))+1
-    gdenom = np.power(np.multiply(range(1, leg_order+1), range(2, leg_order+2)), m, dtype=float)
-    hdenom = np.power(np.multiply(range(1, leg_order+1), range(2, leg_order+2)), m-1, dtype=float)
-
-    G = np.zeros((numelectrodes, numelectrodes))
-    H = np.zeros((numelectrodes, numelectrodes))
-
-    for i in range(numelectrodes):
-        for j in range(i, numelectrodes):
-
-            g = 0
-            h = 0
-
-            for ni in range(leg_order):
-                g = g + (twoN1[ni] * legpoly[ni,i,j]) / gdenom[ni]
-                h = h - (twoN1[ni] * legpoly[ni,i,j]) / hdenom[ni]
-
-            G[i,j] = g / (4*np.pi)
-            H[i,j] = -h / (4*np.pi)
-
-    G = G + G.T
-    H = H + H.T
-
-    G = G - np.identity(numelectrodes) * G[1,1] / 2
-    H = H - np.identity(numelectrodes) * H[1,1] / 2
-
-    # compute C matrix
-    Gs = G + np.identity(numelectrodes) * smoothing
-    GsinvS = np.sum(np.linalg.inv(Gs), 0)
-    dataGs = np.dot(data.T, np.linalg.inv(Gs))
-    C = dataGs - np.dot(np.atleast_2d(np.sum(dataGs, 1)/np.sum(GsinvS)).T, np.atleast_2d(GsinvS))
-
-    # apply transform
-    original = np.reshape(data, orig_data_size)
-    surf_lap = np.reshape(np.transpose(np.dot(C,np.transpose(H))), orig_data_size)
-
-    info = raw.info
-    raw_lap =  mne.io.RawArray(surf_lap,info)
-    
-    return raw_lap
-
-
-
-
-
-########################################
-######## GENERATE FOLDERS ########
-########################################
-
-
-#os.getcwd()
-def create_folder(folder_name, construct_token):
-    if os.path.exists(folder_name) == False:
-        os.mkdir(folder_name)
-        print('create : ' + folder_name)
-        construct_token += 1
-    return construct_token
-
-def generate_folder_structure(sujet):
-
-    construct_token = 0
-
-    os.chdir(path_general)
-    
-    construct_token = create_folder('Analyses', construct_token)
-    construct_token = create_folder('Data', construct_token)
-    construct_token = create_folder('Mmap', construct_token)
-
-    #### Analyses
-    os.chdir(os.path.join(path_general, 'Analyses'))
-    construct_token = create_folder('preprocessing', construct_token)
-    construct_token = create_folder('precompute', construct_token)
-    construct_token = create_folder('results', construct_token)
-    construct_token = create_folder('protocole', construct_token)
-    
-        #### preprocessing
-    os.chdir(os.path.join(path_general, 'Analyses', 'preprocessing'))
-
-        #### precompute
-    os.chdir(os.path.join(path_general, 'Analyses', 'precompute'))
-    construct_token = create_folder(sujet, construct_token)
-    construct_token = create_folder('allsujet', construct_token)
-
-        #### results
-    os.chdir(os.path.join(path_general, 'Analyses', 'results'))
-    construct_token = create_folder(sujet, construct_token)
-
-    return construct_token
-
-
-
-
-    
-
-
-################################################
-######## DATA MANAGEMENT CLUSTER ########
-################################################
-
-
-def sync_folders__push_to_mnt():
-
-    #### need to be exectuted outside of cluster to work
-    folder_to_push_to = {path_data : os.path.join(path_mntdata, 'Data'), path_precompute : os.path.join(path_mntdata, 'Analyses', 'precompute'), 
-                         path_prep : os.path.join(path_mntdata, 'Analyses', 'preprocessing'), path_main_workdir : os.path.join(path_mntdata, 'Scripts'),
-                         path_slurm : os.path.join(path_mntdata, 'Scripts_slurm'), 
-                         os.path.join(path_results, 'RESPI', 'respfeatures') : os.path.join(path_mntdata, 'Analyses', 'results', 'RESPI', 'respfeatures')}
-            
-    #### We push from A to B
-    for folder_local, folder_remote in folder_to_push_to.items():
-
-        subprocess.run([f"rsync -avz --delete -v {folder_local}/ {folder_remote}/"], shell=True)
-
-
-
-
-
-def sync_folders__push_to_crnldata():
-
-    #### dont push scripts from mnt to crnldata
-    folder_to_push_to = {path_data : os.path.join(path_mntdata, 'Data'), path_precompute : os.path.join(path_mntdata, 'Analyses', 'precompute'), 
-                         path_prep : os.path.join(path_mntdata, 'Analyses', 'preprocessing'), path_slurm : os.path.join(path_mntdata, 'Scripts_slurm')}
-            
-    #### We push from A to B
-    for folder_local, folder_remote in folder_to_push_to.items():
-
-        subprocess.run([f"rsync -avz --delete -v {folder_remote}/ {folder_local}/"], shell=True)
-
-    
-
-
-
-
-
-
-################################
-######## SLURM EXECUTE ########
-################################
-
-#params_one_script = [sujet]
-def write_script_slurm(name_script, name_function, params_one_script, n_core, mem):
-        
-    python = sys.executable
-
-    #### params to print in script
-    params_str = ""
-    for i, params_i in enumerate(params_one_script):
-        if isinstance(params_i, str):
-            str_i = f"'{params_i}'"
-        else:
-            str_i = str(params_i)
-
-        if i == 0 :
-            params_str = params_str + str_i
-        else:
-            params_str = params_str + ' , ' + str_i
-
-    #### params to print in script name
-    params_str_name = ''
-    for i, params_i in enumerate(params_one_script):
-
-        str_i = str(params_i)
-
-        if i == 0 :
-            params_str_name = params_str_name + str_i
-        else:
-            params_str_name = params_str_name + '_' + str_i
-
-    #### remove all txt that block name save
-    for txt_remove_i in ["'", "[", "]", "{", "}", ":", " ", ","]:
-        if txt_remove_i == " " or txt_remove_i == ",":
-            params_str_name = params_str_name.replace(txt_remove_i, '_')
-        else:
-            params_str_name = params_str_name.replace(txt_remove_i, '')
-    
-    #### script text
-    lines = [f'#! {python}']
-    lines += ['import sys']
-    lines += [f"sys.path.append('{os.path.join(path_mntdata, 'Scripts')}')"]
-    lines += [f'from {name_script} import {name_function}']
-    lines += [f'{name_function}({params_str})']
-        
-    #### write script and execute
-    os.chdir(path_slurm)
-    slurm_script_name =  f"run__{name_function}__{params_str_name}.py" #add params
-        
-    with open(slurm_script_name, 'w') as f:
-        f.writelines('\n'.join(lines))
-        os.fchmod(f.fileno(), mode = stat.S_IRWXU)
-        f.close()
-    
-    #### script text
-    lines = ['#!/bin/bash']
-    lines += [f'#SBATCH --job-name={name_function}']
-    lines += [f'#SBATCH --output=%slurm_{name_function}_{params_str_name}.log']
-    lines += [f'#SBATCH --cpus-per-task={n_core}']
-    lines += [f'#SBATCH --mem={mem}']
-    lines += [f"srun {python} {os.path.join(path_mntdata, 'Scripts_slurm', slurm_script_name)}"]
-        
-    #### write script and execute
-    slurm_bash_script_name =  f"bash__{name_function}__{params_str_name}.sh" #add params
-        
-    with open(slurm_bash_script_name, 'w') as f:
-        f.writelines('\n'.join(lines))
-        os.fchmod(f.fileno(), mode = stat.S_IRWXU)
-        f.close()
-
-    return slurm_bash_script_name
-
-
-
-def execute_script_slurm(slurm_bash_script_name):
-
-    #### execute bash
-    print(f'#### slurm submission : {slurm_bash_script_name}')
-    os.chdir(os.path.join(path_mntdata, 'Scripts_slurm'))
-    subprocess.run([f'sbatch {slurm_bash_script_name}'], shell=True) 
-
-
-
-#name_script, name_function, params = 'n07_precompute_FC', 'get_MI_sujet_stretch', [[sujet] for sujet in sujet_list_FC]
-def execute_function_in_slurm_bash(name_script, name_function, params, n_core=15, mem='15G'):
-
-    script_path = os.getcwd()
-
-    #### write process
-    if any(isinstance(i, list) for i in params):
-
-        slurm_bash_script_name_list = []
-
-        for one_param_set in params:
-            
-            _slurm_bash_script_name = write_script_slurm(name_script, name_function, one_param_set, n_core, mem)
-            slurm_bash_script_name_list.append(_slurm_bash_script_name)
-
-    else:
-
-        slurm_bash_script_name = write_script_slurm(name_script, name_function, params, n_core, mem)
-
-    #### synchro
-    sync_folders__push_to_mnt()
-
-    #### exec
-    if any(isinstance(i, list) for i in params):
-
-        for _slurm_bash_script_name in slurm_bash_script_name_list:
-            execute_script_slurm(_slurm_bash_script_name)
-            
-    else:
-
-        execute_script_slurm(slurm_bash_script_name)
-
-    #### get back to original path
-    os.chdir(script_path)
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -496,61 +141,14 @@ def load_data_sujet(sujet, cond):
     return data
 
 
-def load_data_sujet_CSD(sujet, cond):
 
-    path_source = os.getcwd()
-    
-    os.chdir(path_prep)
+def get_chanlocalist(sujet):
 
-    raw = mne.io.read_raw_fif(f'{sujet}_{cond}_CSD.fif', preload=True, verbose='critical')
+    path_filechanloca = os.path.join(path_anatomy, f"{sujet}_locafile.xlsx")
+    df_loca_raw = pd.read_excel(path_filechanloca)
 
-    data = raw.get_data()
+    return df_loca_raw
 
-    #### go back to path source
-    os.chdir(path_source)
-
-    #### free memory
-    del raw
-
-    return data
-
-
-def get_srate(sujet):
-
-    path_source = os.getcwd()
-    
-    os.chdir(os.path.join(path_prep, sujet, 'sections'))
-
-    raw = mne.io.read_raw_fif(sujet + '_FR_CV_1_lf.fif', preload=True, verbose='critical')
-    
-    srate = int(raw.info['sfreq'])
-
-    #### go back to path source
-    os.chdir(path_source)
-
-    #### free memory
-    del raw
-
-    return srate
-
-
-def get_pos_file(sujet, band_prep):
-
-    path_source = os.getcwd()
-    
-    os.chdir(os.path.join(path_prep, sujet, 'sections'))
-
-    raw = mne.io.read_raw_fif(f'{sujet}_o_FR_CV_1_{band_prep}.fif', preload=True, verbose='critical')
-    
-    info = raw.info
-
-    #### go back to path source
-    os.chdir(path_source)
-
-    #### free memory
-    del raw
-
-    return info
 
 
 
@@ -1031,6 +629,8 @@ def get_Cxy_2sig(x, y):
 
 
 
+
+
 ########################################
 ######## SCRIPT ADVANCEMENT ########
 ########################################
@@ -1125,7 +725,8 @@ def norm_tf(sujet, tf_conv, norm_method):
 
     path_source = os.getcwd()
 
-    chan_list_sel = chan_list_eeg_short
+    chan_list_sel = []
+    chan_list_eeg = []
 
     if norm_method not in ['rscore', 'zscore']:
 
@@ -1238,6 +839,9 @@ def norm_tf(sujet, tf_conv, norm_method):
     os.chdir(path_source)
 
     return tf_conv
+
+
+
 
 
 
@@ -1504,11 +1108,6 @@ def get_hrv_metrics_win(RRI):
 
 
 
-########################################
-######## HRV METRICS HOMEMADE ######## 
-########################################
-
-
 
 def get_PSD_LF_HF(RRI_resample, prms_hrv, VLF, LF, HF):
 
@@ -1632,31 +1231,7 @@ def get_hrv_metrics_homemade(cR_time, prms_hrv, analysis_time='5min'):
 
 
 
-################################
-######## NEUROKIT ######## 
-################################
 
-#ecg_i = xr_chunk[sujet_i, cond_i, trial_i, :].data
-def nk_analysis(ecg_i, srate):
-
-    ecg_cR = scipy.signal.find_peaks(ecg_i, distance=srate*0.5)[0]
-    peaks_dict = {'ECG_R_Peaks' : ecg_cR}
-    ecg_peaks = pd.DataFrame(peaks_dict)
-
-    hrv_metrics = nk.hrv(ecg_peaks, sampling_rate=srate, show=False)
-
-    hrv_metrics_name = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_pNN50', 'HRV_LF', 'HRV_HF', 'HRV_LFHF', 'HRV_SD1', 'HRV_SD2', 'HRV_S']
-
-    col_to_drop = []
-    col_hrv = list(hrv_metrics.columns.values) 
-    for metric_name in col_hrv :
-        if (metric_name in hrv_metrics_name) == False :
-            col_to_drop.append(metric_name)
-
-    hrv_metrics_short = hrv_metrics.copy()
-    hrv_metrics_short = hrv_metrics_short.drop(col_to_drop, axis=1)
-
-    return hrv_metrics_short
 
 
 ########################################
@@ -1933,178 +1508,6 @@ def get_permutation_cluster_1d(data_baseline, data_cond, n_surr, stat_design='wi
 
 
 
-# # data_baseline, data_cond, n_surr = data_baseline, data_cond, ERP_n_surrogate
-# def get_permutation_cluster_1d_DEBUG(data_baseline, data_cond, n_surr, mode_grouped='mean', mode_generate_surr='minmax', mode_select_thresh='median', size_thresh_alpha=0.05, size_thresh_smooth=0.01):
-
-#     n_trials_baselines = data_baseline.shape[0]
-#     len_sig = data_baseline.shape[-1]
-
-#     data_shuffle = np.concatenate((data_baseline, data_cond), axis=0)
-#     n_trial_tot = data_shuffle.shape[0]
-
-#     if mode_grouped == 'mean':
-#         data_baseline_grouped = np.mean(data_baseline, axis=0)
-#         data_cond_grouped = np.mean(data_cond, axis=0)
-#     elif mode_grouped == 'median':
-#         data_baseline_grouped = np.median(data_baseline, axis=0)
-#         data_cond_grouped = np.median(data_cond, axis=0)
-
-#     if debug:
-#         time = np.arange(len_sig)
-#         sem_baseline = data_baseline.std(axis=0)/np.sqrt(data_baseline.shape[0])
-#         sem_cond = data_cond.std(axis=0)/np.sqrt(data_cond.shape[0])
-
-#         plt.plot(time, data_baseline_grouped, label='baseline', color='c')
-#         plt.fill_between(time, data_baseline_grouped-sem_baseline, data_baseline_grouped+sem_baseline, color='c', alpha=0.5)
-#         plt.plot(time, data_cond_grouped, label='cond', color='g')
-#         plt.fill_between(time, data_cond_grouped-sem_cond, data_cond_grouped+sem_cond, color='g', alpha=0.5)
-#         plt.legend()
-#         plt.show()
-
-#     obs_distrib = data_cond_grouped - data_baseline_grouped
-
-#     surr_distrib = np.zeros((n_surr, 2))
-
-#     #surr_i = 0
-#     for surr_i in range(n_surr):
-
-#         #### shuffle
-#         random_sel = np.random.choice(n_trial_tot, size=n_trial_tot, replace=False)
-#         data_shuffle_baseline = data_shuffle[random_sel[:n_trials_baselines]]
-#         data_shuffle_cond = data_shuffle[random_sel[n_trials_baselines:]]
-
-#         if mode_grouped == 'mean':
-#             diff_shuffle = np.mean(data_shuffle_cond, axis=0) - np.mean(data_shuffle_baseline, axis=0)
-#         elif mode_grouped == 'median':
-#             diff_shuffle = np.median(data_shuffle_cond, axis=0) - np.median(data_shuffle_baseline, axis=0)
-
-#         if debug:
-#             plt.plot(np.mean(data_shuffle_baseline, axis=0), label='baseline')
-#             plt.plot(np.mean(data_shuffle_cond, axis=0), label='cond')
-#             plt.legend()
-#             plt.show()
-
-#             plt.hist(np.median(data_shuffle_baseline, axis=0), bins=50, label='baseline', alpha=0.5)
-#             plt.hist(np.median(data_shuffle_cond, axis=0), bins=50, label='cond', alpha=0.5)
-#             plt.legend()
-#             plt.show()
-
-#         #### generate distrib
-#         if mode_generate_surr == 'minmax':
-#             surr_distrib[surr_i, 0], surr_distrib[surr_i, 1] = diff_shuffle.min(), diff_shuffle.max()
-#         elif mode_generate_surr == 'percentile':
-#             surr_distrib[surr_i, 0], surr_distrib[surr_i, 1] = np.percentile(diff_shuffle, 1), np.percentile(diff_shuffle, 99)    
-
-#     if debug:
-#         count, _, _ = plt.hist(surr_distrib[:,0], bins=50, color='k', alpha=0.5)
-#         count, _, _ = plt.hist(surr_distrib[:,1], bins=50, color='k', alpha=0.5)
-#         count, _, _ = plt.hist(obs_distrib, bins=50, label='obs', color='g')
-#         plt.vlines([np.median(surr_distrib[:,0])], ymin=0, ymax=count.max(), label='median', colors='r')
-#         plt.vlines([np.median(surr_distrib[:,1])], ymin=0, ymax=count.max(), colors='r')
-#         plt.vlines([np.mean(surr_distrib[:,0])], ymin=0, ymax=count.max(), label='mean', colors='b')
-#         plt.vlines([np.mean(surr_distrib[:,1])], ymin=0, ymax=count.max(), colors='b')
-#         plt.vlines([np.percentile(surr_distrib[:,0], 1)], ymin=0, ymax=count.max(), label='perc_1_99', colors='r', linestyles='--')
-#         plt.vlines([np.percentile(surr_distrib[:,1], 99)], ymin=0, ymax=count.max(), colors='r', linestyles='--')
-#         plt.vlines([np.percentile(surr_distrib[:,0], 2.5)], ymin=0, ymax=count.max(), label='perc_025_975', colors='r', linestyles='-.')
-#         plt.vlines([np.percentile(surr_distrib[:,1], 97.5)], ymin=0, ymax=count.max(), colors='r', linestyles='-.')
-#         plt.legend()
-#         plt.show()
-
-#         plt.plot(obs_distrib)
-#         plt.hlines([np.median(surr_distrib[:,0])], xmin=0, xmax=len_sig, label='median', colors='r')
-#         plt.hlines([np.median(surr_distrib[:,1])], xmin=0, xmax=len_sig, colors='r')
-#         plt.hlines([np.mean(surr_distrib[:,0])], xmin=0, xmax=len_sig, label='mean', colors='b')
-#         plt.hlines([np.mean(surr_distrib[:,1])], xmin=0, xmax=len_sig, colors='b')
-#         plt.hlines([np.percentile(surr_distrib[:,0], 1)], xmin=0, xmax=len_sig, label='perc_1_99', colors='r', linestyles='--')
-#         plt.hlines([np.percentile(surr_distrib[:,1], 99)], xmin=0, xmax=len_sig, colors='r', linestyles='--')
-#         plt.hlines([np.percentile(surr_distrib[:,0], 2.5)], xmin=0, xmax=len_sig, label='perc_025_975', colors='r', linestyles='-.')
-#         plt.hlines([np.percentile(surr_distrib[:,1], 97.5)], xmin=0, xmax=len_sig, colors='r', linestyles='-.')
-#         plt.legend()
-#         plt.show()
-
-#     if mode_select_thresh == 'percentile':
-#         # surr_dw, surr_up = np.percentile(surr_distrib[:,0], 2.5, axis=0), np.percentile(surr_distrib[:,1], 97.5, axis=0)
-#         surr_dw, surr_up = np.percentile(surr_distrib[:,0], 1, axis=0), np.percentile(surr_distrib[:,1], 99, axis=0)
-#     elif mode_select_thresh == 'mean':
-#         surr_dw, surr_up = np.mean(surr_distrib[:,0], axis=0), np.median(surr_distrib[:,1], axis=0)
-#     elif mode_select_thresh == 'median':
-#         surr_dw, surr_up = np.median(surr_distrib[:,0], axis=0), np.median(surr_distrib[:,1], axis=0)
-
-#     #### thresh data
-#     mask = (obs_distrib < surr_dw) | (obs_distrib > surr_up)
-
-#     if debug:
-
-#         plt.scatter(range(mask.size), mask)
-#         plt.show()
-
-#     if mask.sum() != 0:
-    
-#         #### thresh cluster
-#         mask_thresh = mask.astype('uint8')
-#         nb_blobs, im_with_separated_blobs, stats, _ = cv2.connectedComponentsWithStats(mask_thresh)
-#         #### nb_blobs, im_with_separated_blobs, stats = nb clusters, clusters image with labeled clusters, info on clusters
-#         sizes = stats[1:, -1]
-#         nb_blobs -= 1
-#         # min_size = np.percentile(sizes,size_thresh)  
-#         min_size = len_sig*size_thresh_alpha  
-#         min_size_smooth = int(len_sig*size_thresh_smooth) | 1
-
-#         if debug:
-
-#             count, _, _ = plt.hist(sizes, bins=50, cumulative=True)
-#             plt.vlines(min_size, ymin=0, ymax=count.max(), colors='r')
-#             plt.show()
-
-#         corrected_mask = mask_thresh.copy()
-#         corrected_mask[0] = corrected_mask[1]
-#         transitions = np.where(np.diff(corrected_mask))[0].astype('int')+1
-        
-#         #transi_i = transitions[0]
-#         for transi_i in transitions:
-
-#             if np.unique(corrected_mask[transi_i:transi_i+min_size_smooth]).shape[0] != 1:
-#                 corrected_mask[transi_i:transi_i+min_size_smooth] = corrected_mask[transi_i-1]
-
-#         if debug:
-
-#             plt.scatter(range(mask_thresh.size), mask, label='thresh')
-#             plt.scatter(range(corrected_mask.size), corrected_mask, label='corrected')
-#             plt.legend
-#             plt.show()
-
-#         corrected_mask = np.zeros_like(im_with_separated_blobs)
-#         for blob in range(nb_blobs):
-#             if sizes[blob] >= min_size:
-#                 corrected_mask[im_with_separated_blobs == blob + 1] = 1
-
-#         corrected_mask = corrected_mask.reshape(-1)
-
-#         if debug:
-
-#             time = np.arange(data_baseline.shape[-1])
-#             sem_baseline = data_baseline.std(axis=0)/np.sqrt(data_baseline.shape[0])
-#             sem_cond = data_cond.std(axis=0)/np.sqrt(data_cond.shape[0])
-
-#             plt.plot(time, data_baseline_grouped, label='baseline', color='c')
-#             plt.fill_between(time, data_baseline_grouped-sem_baseline, data_baseline_grouped+sem_baseline, color='c', alpha=0.5)
-#             plt.plot(time, data_cond_grouped, label='cond', color='g')
-#             plt.fill_between(time, data_cond_grouped-sem_cond, data_cond_grouped+sem_cond, color='g', alpha=0.5)
-#             plt.fill_between(time, data_baseline_grouped.min(), data_cond_grouped.max(), where=mask, color='r', alpha=0.5, label='not_thresh')
-#             plt.fill_between(time, data_baseline_grouped.min(), data_cond_grouped.max(), where=corrected_mask, color='y', alpha=0.5, label='thresh')
-#             plt.title('mask not threshed')
-#             plt.legend()
-#             plt.show()
-
-#     else:
-
-#         corrected_mask = mask
-
-#     return corrected_mask
-
-
-
-
 # data_baseline, data_cond, n_surr = tf_stretch_baseline_allsujet, tf_stretch_cond_allsujet, 1000
 def get_permutation_cluster_2d(data_baseline, data_cond, n_surr, stat_design='within', mode_grouped='median', mode_generate_surr='percentile_time', 
                                mode_select_thresh='percentile_time', percentile_thresh=[0.5, 99.5], size_thresh_alpha=0.01):
@@ -2260,119 +1663,7 @@ def get_permutation_cluster_2d(data_baseline, data_cond, n_surr, stat_design='wi
     return mask_thresh
 
 
-# # data_baseline, data_cond, n_surr = tf_stretch_baselines[0,:,:,:], tf_stretch_cond[0,:,:,:], 1000
-# def get_permutation_cluster_2d_DEBUG(data_baseline, data_cond, n_surr, mode_grouped='mean', size_thresh_alpha=0.01):
 
-
-
-#     #### define ncycle
-#     n_trial_baselines = data_baseline.shape[0]
-#     n_trial_cond = data_cond.shape[0]
-#     n_trial_tot = n_trial_baselines + n_trial_cond
-#     len_sig = data_baseline.shape[-1]
-
-#     data_shuffle = np.concatenate((data_baseline, data_cond), axis=0)
-
-#     if mode_grouped == 'mean':
-#         data_baseline_grouped = np.mean(data_baseline, axis=0)
-#         data_cond_grouped = np.mean(data_cond, axis=0)
-#     elif mode_grouped == 'median':
-#         data_baseline_grouped = np.median(data_baseline, axis=0)
-#         data_cond_grouped = np.median(data_cond, axis=0)
-
-#     obs_distrib = data_cond_grouped - data_baseline_grouped
-
-#     if debug:
-
-#         plt.pcolormesh(obs_distrib)
-#         plt.show()
-
-#     #### space allocation
-#     surr_distrib = np.zeros((n_surr, nfrex, len_sig), dtype=np.float32)
-
-#     #surr_i = 0
-#     for surr_i in range(n_surr):
-
-#         print_advancement(surr_i, n_surr, steps=[25, 50, 75])
-
-#         #### shuffle
-#         random_sel = np.random.choice(n_trial_tot, size=n_trial_tot, replace=False)
-#         data_shuffle_baseline = data_shuffle[random_sel[:n_trial_baselines]]
-#         data_shuffle_cond = data_shuffle[random_sel[n_trial_baselines:]]
-
-#         if mode_grouped == 'mean':
-#             diff_shuffle = np.mean(data_shuffle_cond, axis=0) - np.mean(data_shuffle_baseline, axis=0)
-#         elif mode_grouped == 'median':
-#             diff_shuffle = np.median(data_shuffle_cond, axis=0) - np.median(data_shuffle_baseline, axis=0)
-
-#         surr_distrib[surr_i,:,:] = diff_shuffle
-
-#         if debug:
-#             plt.pcolormesh(diff_shuffle)
-#             plt.show()
-
-#     surr_dw, surr_up = np.percentile(surr_distrib, 1, axis=0), np.percentile(surr_distrib, 99, axis=0)
-
-#     if debug:
-
-#         wavelets_i = 50
-
-#         plt.plot(obs_distrib[wavelets_i,:])
-#         plt.plot(np.percentile(surr_distrib[wavelets_i,:], 1, axis=0), label='perc_1_99', color='r', linestyle='--')
-#         plt.plot(np.percentile(surr_distrib[wavelets_i,:], 99, axis=0), color='r', linestyle='--')
-#         plt.plot(np.percentile(surr_distrib[wavelets_i,:], 2.5, axis=0), label='perc_025_975', color='g', linestyle='-.')
-#         plt.plot(np.percentile(surr_distrib[wavelets_i,:], 97.5, axis=0), color='g', linestyle='-.')
-#         plt.legend()
-#         plt.show()
-
-#     #### thresh data
-#     mask = np.zeros((obs_distrib.shape), dtype='bool')
-#     for row_i in range(obs_distrib.shape[0]):
-#         mask[row_i,:] = (obs_distrib[row_i,:] < surr_dw[row_i]) | (obs_distrib[row_i,:] > surr_up[row_i])
-
-#     if debug:
-
-#         plt.pcolormesh(mask)
-#         plt.show()
-
-#     if mask.sum() != 0:
-    
-#         #### thresh cluster
-#         mask_thresh = mask.astype('uint8')
-#         nb_blobs, im_with_separated_blobs, stats, _ = cv2.connectedComponentsWithStats(mask_thresh)
-#         #### nb_blobs, im_with_separated_blobs, stats = nb clusters, clusters image with labeled clusters, info on clusters
-#         sizes = stats[1:, -1]
-#         nb_blobs -= 1
-#         # min_size = np.percentile(sizes,size_thresh)  
-#         min_size = len_sig*size_thresh_alpha  
-
-#         if debug:
-
-#             count, _, _ = plt.hist(sizes, bins=50, cumulative=True)
-#             plt.vlines(min_size, ymin=0, ymax=count.max(), colors='r')
-#             plt.show()
-
-#         mask_thresh = np.zeros_like(im_with_separated_blobs)
-#         for blob in range(nb_blobs):
-#             if sizes[blob] >= min_size:
-#                 mask_thresh[im_with_separated_blobs == blob + 1] = 1
-
-#         if debug:
-
-#             fig, ax = plt.subplots()
-
-#             time_vec = np.arange(len_sig)
-
-#             ax.pcolormesh(obs_distrib, shading='gouraud', cmap=plt.get_cmap('seismic'))
-#             ax.contour(mask_thresh, levels=0, colors='g')
-
-#             plt.show()
-
-#     else:
-
-#         mask_thresh = mask
-
-#     return mask_thresh
 
 
 
@@ -2412,24 +1703,6 @@ def iirfilt(sig, srate, lowcut=None, highcut=None, order=4, ftype='butter', verb
 
     return filtered_sig
 
-
-
-
-
-########################################
-######## CLUSTER WORKING ######## 
-########################################
-
-#name = 'test.png'
-def export_fig(name, fig):
-
-    path_pre = os.getcwd()
-
-    os.chdir(path_general)
-
-    fig.savefig(name)
-
-    os.chdir(path_pre)
 
 
 

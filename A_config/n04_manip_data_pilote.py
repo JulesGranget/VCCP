@@ -1,7 +1,7 @@
 
-from n00_config_params import *
-from n00bis_config_analysis_functions import *
-from n01bis_patient_info import *
+from A_config.n01_O_config_params import *
+from A_config.n02_O_config_analysis_functions import *
+from A_config.n03_O_patient_info import *
 
 import plotly.graph_objects as go
 import seaborn as sns
@@ -20,8 +20,11 @@ def find_best_lag(_respi, y, srate_sl):
 
     if debug:
 
-        plt.plot(scipy.stats.zscore(_respi), label='respi')
-        plt.plot(scipy.stats.zscore(y), label=f'CO2')
+        time_vec = np.arange(_respi.shape[0]) / srate_sl
+
+        plt.plot(time_vec, scipy.stats.zscore(_respi), label='respi')
+        plt.plot(time_vec, scipy.stats.zscore(y), label=f'CO2')
+        plt.legend()
         plt.show()
 
     t = np.arange(y.size)
@@ -54,14 +57,16 @@ def find_best_lag(_respi, y, srate_sl):
 
     if debug:
 
+        time_vec = np.arange(_respi.shape[0]) / srate_sl
+
         plt.plot(y_det)
         plt.scatter(_peaks_y, y_det[_peaks_y], color='r')
         plt.legend()
         plt.show()
 
         imp_respi, imp_y = np.zeros(y.size), np.zeros(y.size)
-        plt.scatter(_peaks_y, imp_respi[_peaks_y], label='y')
-        plt.scatter(_peaks_respi, imp_y[_peaks_respi], label='respi')
+        plt.scatter(time_vec[_peaks_y], imp_respi[_peaks_y], label='y')
+        plt.scatter(time_vec[_peaks_respi], imp_y[_peaks_respi], label='respi')
         plt.legend()
         plt.show()
         
@@ -75,10 +80,12 @@ def find_best_lag(_respi, y, srate_sl):
 
     if debug:
 
+        time_vec = np.arange(_respi.shape[0]) / srate_sl
+
         _shifted_y = np.roll(y, _shift_val_y)
-        plt.plot(scipy.stats.zscore(_respi), label='respi')
-        plt.plot(scipy.stats.zscore(y), label=f'raw_y')
-        plt.plot(scipy.stats.zscore(_shifted_y), label=f'shift_y')
+        plt.plot(time_vec, scipy.stats.zscore(_respi), label='respi')
+        plt.plot(time_vec, scipy.stats.zscore(y), label=f'raw_y')
+        plt.plot(time_vec, scipy.stats.zscore(_shifted_y), label=f'shift_y')
         plt.legend()
         plt.show()
 
@@ -87,14 +94,7 @@ def find_best_lag(_respi, y, srate_sl):
 
 
 #sujet = 'NS217'
-def load_physio_data(sujet):
-
-    #### params
-    # CO2_delay = 2.9 #sec
-    # O2_delay = 1.59 #sec
-
-    CO2_delay = 0 #sec
-    O2_delay = 0 #sec
+def load_physio_data(sujet, srate_sl):    
 
     #### Extraction data
     if sujet == 'jules':
@@ -103,6 +103,10 @@ def load_physio_data(sujet):
         df = pd.read_csv(os.path.join(path_data, 'pilot', 'CPvolitional_Jules_3_clean.csv'))
     elif sujet == 'jose':
         df = pd.read_csv(os.path.join(path_data, 'pilot', 'jose_volitional_capnic_CP_protocol_clean.csv'))
+    elif sujet == 'test_aaron_params':
+        df = pd.read_csv(os.path.join(path_data, 'pilot', 'Aaron_new_params_clean.csv'))
+    elif sujet == 'test_new_CO2_metric':
+        df = pd.read_csv(os.path.join(path_data, 'pilot', 'etCO2_VS_continuousCO2_clean.csv'))
     else:
         os.chdir(os.path.join(path_data, sujet))
         _file_sl = [file for file in os.listdir() if file.find('_cleaned.csv') != -1][0]
@@ -116,8 +120,41 @@ def load_physio_data(sujet):
     trig = df['Digital I/O: Input 1'].values[1:].astype(float)
     CO2_raw = df['Serial Port 1: CO2 Concentration'].values[1:].astype(float)
 
-    O2 = np.roll(O2_raw, O2_delay*srate_sl)
-    CO2 = np.roll(CO2_raw, CO2_delay*srate_sl)
+    if sujet == 'test_aaron_params':
+
+        if debug:
+            plt.plot(flow_inspi)
+            y = scipy.signal.savgol_filter(flow_inspi, window_length=20, polyorder=19)
+            plt.plot(y)
+            plt.show()
+
+        diff_inspi = np.diff(flow_inspi)*-1
+        diff_expi = np.diff(flow_expi)
+
+        peaks_inspi_end, _ = scipy.signal.find_peaks(diff_inspi, height=diff_inspi.std()*2, distance=srate_sl*4)
+        peaks_expi, _ = scipy.signal.find_peaks(diff_expi, height=diff_expi.std()*2, distance=srate_sl*4)
+
+        diff_inspi_expi = peaks_expi[0] - peaks_inspi_end[0]
+
+        time_raw = df['Session Time'].values[1:][:-diff_inspi_expi]
+        flow_expi = df['Module 1: Raw Flow'].values[1:].astype(float)[diff_inspi_expi:]
+        pressure = df['Module 2: Raw Pressure'].values[1:].astype(float)[:-diff_inspi_expi]
+        O2_raw = df['Internal Sensor: O2 Concentration'].values[1:].astype(float)[:-diff_inspi_expi]
+        flow_inspi = df['Module 4: Raw Flow'].values[1:].astype(float)[:-diff_inspi_expi]
+        trig = df['Digital I/O: Input 1'].values[1:].astype(float)[:-diff_inspi_expi]
+        CO2_raw = df['Serial Port 1: CO2 Concentration'].values[1:].astype(float)[diff_inspi_expi:]
+
+    if sujet == 'test_new_CO2_metric':
+
+        pExhaleCO2 = df['Serial Port 1: Exhale % CO2'].values[1:].astype(float)
+
+        norm_val = CO2_raw.max() / flow_expi.max()
+        flow_expi_norm = flow_expi * norm_val
+        plt.plot(CO2_raw, label='CO2_alltime')
+        plt.plot(pExhaleCO2, label='CO2_onepoint')
+        plt.plot(flow_expi_norm, label='expi_flow')
+        plt.legend()
+        plt.show()
 
     if debug:
 
@@ -126,10 +163,10 @@ def load_physio_data(sujet):
 
         plt.plot(scipy.stats.zscore(flow_expi[:select_time]), label='flow_expi')
         plt.plot(scipy.stats.zscore(pressure[:select_time])+1*x_scale, label='pressure')
-        plt.plot(scipy.stats.zscore(O2[:select_time])+2*x_scale, label='O2')
+        plt.plot(scipy.stats.zscore(O2_raw[:select_time])+2*x_scale, label='O2')
         plt.plot(scipy.stats.zscore(flow_inspi[:select_time])+3*x_scale, label='flow_inspi')
         plt.plot(scipy.stats.zscore(trig[:select_time])+4*x_scale, label='trig')
-        plt.plot(scipy.stats.zscore(CO2[:select_time])+5*x_scale, label='CO2')
+        plt.plot(scipy.stats.zscore(CO2_raw[:select_time])+5*x_scale, label='CO2')
         plt.legend()
         plt.show()
 
@@ -154,7 +191,6 @@ def load_physio_data(sujet):
         plt.legend()
         plt.show()
 
-
     #### constructing respi
 
     respi = flow_inspi*-1 + flow_expi
@@ -174,6 +210,49 @@ def load_physio_data(sujet):
         plt.plot(scipy.stats.zscore(CO2_raw))
         plt.show()
 
+    #### roll CO2 / O2
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+
+        plt.plot(flow_expi[:select_time], label='flow_expi')
+        plt.plot(CO2_raw[:select_time], label='CO2_raw')
+        plt.legend()
+        plt.show()
+
+        plt.plot(flow_inspi[:select_time], label='flow_inspi')
+        plt.plot(O2_raw[:select_time], label='O2_raw')
+        plt.legend()
+        plt.show()
+
+    CO2_delay = -3 #sec
+    O2_delay = -1.5 #sec
+
+    O2 = np.roll(O2_raw, O2_delay*srate_sl)
+    CO2 = np.roll(CO2_raw, CO2_delay*srate_sl)
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+        time_vec = np.arange(select_time) / srate_sl
+
+        plt.plot(flow_expi[:select_time], label='flow_expi')
+        plt.plot(CO2[:select_time], label='CO2_shift')
+        plt.legend()
+        plt.show()
+
+        plt.plot(flow_inspi[:select_time], label='flow_inspi')
+        plt.plot(O2[:select_time], label='O2_shift')
+        plt.legend()
+        plt.show()
+
+        plt.plot(time_vec, scipy.stats.zscore(respi[:select_time]), label='respi')
+        plt.plot(time_vec, scipy.stats.zscore(CO2[:select_time]), label='CO2_shift')
+        plt.legend()
+        plt.rcParams.update({'font.size': 12})
+        plt.show()
+
     #### extract respi/CO2
 
     if debug:
@@ -184,7 +263,7 @@ def load_physio_data(sujet):
 
         np.where(np.diff(trig) != 0)
 
-    if sujet in ['jose', 'jules']:
+    if sujet in ['jose', 'jules', 'test_aaron_params']:
 
         trig_dict = trig_dict_pilote[sujet]
 
@@ -220,7 +299,7 @@ def load_physio_data(sujet):
 
 def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srate_sl):
     
-    if sujet in ['jose', 'jules']:
+    if sujet in ['jose', 'jules', 'test_aaron_params']:
 
         trig_dict = trig_dict_pilote[sujet]
 
@@ -270,7 +349,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     dict_shift_CO2 = {}
     dict_shift_O2 = {}
 
-    #cond = 'A+R-Cc01'
+    #cond = 'AoR-Co01'
     for cond in trig_dict:
         
         _respi = data_dict_resp_clean[cond]
@@ -284,7 +363,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
         data_dict_O2[cond] = np.roll(_O2, _O2_lag)
 
         dict_shift_CO2[cond] = _CO2_lag
-        dict_shift_O2[cond] = _O2_lag
+        dict_shift_O2[cond] = _O2_lag            
 
     #### extract respfeatures
 
@@ -314,6 +393,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
         ax.scatter(cycles[:,1]/srate_sl, _resp[cycles[:,1]], color='c', label='expi_selected', marker='s')
         plt.legend()
         plt.title(cond)
+        plt.rcParams.update({'font.size': 12})
         # plt.show()
         plt.close()
 
@@ -323,6 +403,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
         ax.scatter(cycles[:,1]/srate_sl, _CO2[cycles[:,1]], color='c', label='expi_selected', marker='s')
         plt.legend()
         plt.title(cond)
+        plt.rcParams.update({'font.size': 12})
         # plt.show()
         plt.close()
 
@@ -332,6 +413,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
         ax.scatter(cycles[:,1]/srate_sl, _O2[cycles[:,1]], color='c', label='expi_selected', marker='s')
         plt.legend()
         plt.title(cond)
+        plt.rcParams.update({'font.size': 12})
         # plt.show()
         plt.close()
         
@@ -349,63 +431,65 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
 
     block_num = {'Ro' : 2, 'R-' : 3}
 
-    for cond in conditions:
+    if sujet not in ['jules', 'jose', 'test_aaron_params']:
 
-        _respfeature = respfeatures[f'{cond}01'][0]
-        _resp = data_dict_resp_clean[f'{cond}01']
-        _CO2 = data_dict_CO2[f'{cond}01']
-        _O2 = data_dict_O2[f'{cond}01']
+        for cond in conditions:
 
-        _resp_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)
-        _CO2_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)
-        _O2_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)
-        
-        if cond.find('Ro') != -1:
+            _respfeature = respfeatures[f'{cond}01'][0]
+            _resp = data_dict_resp_clean[f'{cond}01']
+            _CO2 = data_dict_CO2[f'{cond}01']
+            _O2 = data_dict_O2[f'{cond}01']
+
+            _resp_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)
+            _CO2_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)
+            _O2_stretch, _ = stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)
             
-            for _block_i in range(block_num['Ro'])[1:]:
+            if cond.find('Ro') != -1:
+                
+                for _block_i in range(block_num['Ro'])[1:]:
 
-                if sujet == 'NS217' and cond == 'A+RoC-' and _block_i == 1:
-                    continue
+                    if sujet == 'NS217' and cond == 'A+RoC-' and _block_i == 1:
+                        continue
 
-                _respfeature = respfeatures[f'{cond}0{_block_i+1}'][0]
-                _resp = data_dict_resp_clean[f'{cond}0{_block_i+1}']
-                _CO2 = data_dict_CO2[f'{cond}0{_block_i+1}']
-                _O2 = data_dict_O2[f'{cond}0{_block_i+1}']
+                    _respfeature = respfeatures[f'{cond}0{_block_i+1}'][0]
+                    _resp = data_dict_resp_clean[f'{cond}0{_block_i+1}']
+                    _CO2 = data_dict_CO2[f'{cond}0{_block_i+1}']
+                    _O2 = data_dict_O2[f'{cond}0{_block_i+1}']
 
-                _resp_stretch = np.concatenate([_resp_stretch, stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)[0]])
-                _CO2_stretch = np.concatenate([_CO2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)[0]])
-                _O2_stretch = np.concatenate([_O2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)[0]])
+                    _resp_stretch = np.concatenate([_resp_stretch, stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)[0]])
+                    _CO2_stretch = np.concatenate([_CO2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)[0]])
+                    _O2_stretch = np.concatenate([_O2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)[0]])
 
-        elif cond.find('R-') != -1:
+            elif cond.find('R-') != -1:
 
-            for _block_i in range(block_num['R-'])[1:]:
+                for _block_i in range(block_num['R-'])[1:]:
 
-                if sujet == 'NS217' and cond == 'A+R-C-' and _block_i == 2:
-                    continue
+                    if sujet == 'NS217' and cond == 'A+R-C-' and _block_i == 2:
+                        continue
 
-                _respfeature = respfeatures[f'{cond}0{_block_i+1}'][0]
-                _resp = data_dict_resp_clean[f'{cond}0{_block_i+1}']
-                _CO2 = data_dict_CO2[f'{cond}0{_block_i+1}']
-                _O2 = data_dict_O2[f'{cond}0{_block_i+1}']
+                    _respfeature = respfeatures[f'{cond}0{_block_i+1}'][0]
+                    _resp = data_dict_resp_clean[f'{cond}0{_block_i+1}']
+                    _CO2 = data_dict_CO2[f'{cond}0{_block_i+1}']
+                    _O2 = data_dict_O2[f'{cond}0{_block_i+1}']
 
-                _resp_stretch = np.concatenate([_resp_stretch, stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)[0]])
-                _CO2_stretch = np.concatenate([_CO2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)[0]])
-                _O2_stretch = np.concatenate([_O2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)[0]])
+                    _resp_stretch = np.concatenate([_resp_stretch, stretch_data(_respfeature, nb_point_by_cycle, _resp, srate_sl)[0]])
+                    _CO2_stretch = np.concatenate([_CO2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _CO2, srate_sl)[0]])
+                    _O2_stretch = np.concatenate([_O2_stretch, stretch_data(_respfeature, nb_point_by_cycle, _O2, srate_sl)[0]])
 
-        if debug:
-            plt.plot(_resp_stretch.mean(axis=0))
-            plt.show()
+            if debug:
+                plt.plot(_resp_stretch.mean(axis=0))
+                plt.show()
 
-            plt.plot(_CO2_stretch.mean(axis=0))
-            plt.show()
+                plt.plot(_CO2_stretch.mean(axis=0))
+                plt.show()
 
-            plt.plot(_O2_stretch.mean(axis=0))
-            plt.show()
+                plt.plot(_O2_stretch.mean(axis=0))
+                plt.show()
 
-        data_dict_resp_stretch[cond] = _resp_stretch
-        data_dict_CO2_stretch[cond] = _CO2_stretch
-        data_dict_O2_stretch[cond] = _O2_stretch
-    
+            data_dict_resp_stretch[cond] = _resp_stretch
+            data_dict_CO2_stretch[cond] = _CO2_stretch
+            data_dict_O2_stretch[cond] = _O2_stretch
+        
     #### pilote
     if sujet in ['jules', 'jose']:
 
@@ -498,15 +582,15 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
                 plt.plot(_O2_stretch.mean(axis=0))
                 plt.show()
 
-        data_dict_resp_stretch[cond] = _resp_stretch
-        data_dict_CO2_stretch[cond] = _CO2_stretch
-        data_dict_O2_stretch[cond] = _O2_stretch
+            data_dict_resp_stretch[cond] = _resp_stretch
+            data_dict_CO2_stretch[cond] = _CO2_stretch
+            data_dict_O2_stretch[cond] = _O2_stretch
 
-        if debug:
+            if debug:
 
-            for i in range(data_dict_CO2_stretch['A+RoCc'].shape[0]):
-                plt.plot(data_dict_CO2_stretch['A+RoCc'][i,:])
-            plt.show()
+                for i in range(data_dict_CO2_stretch['A+RoCc'].shape[0]):
+                    plt.plot(data_dict_CO2_stretch['A+RoCc'][i,:])
+                plt.show()
 
         
 
@@ -554,6 +638,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
 
     plt.legend()
     plt.title('RESP')
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     fig_mean_resp.savefig(f"MEAN_RESP.jpeg")
@@ -570,6 +655,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
 
     plt.legend()
     plt.title('CO2')
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     fig_mean_CO2.savefig(f"MEAN_CO2.jpeg")
@@ -586,6 +672,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
 
     plt.legend()
     plt.title('O2')
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     fig_mean_O2.savefig(f"MEAN_O2.jpeg")
@@ -941,6 +1028,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     g = sns.catplot(kind='box', data=df_plot, x='cond', y='value', col="feature_name", sharey=False, showfliers=False)
     plt.suptitle('RESP DURATION')
     plt.tight_layout()
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     g.savefig("RESP_DURATION.png")
@@ -954,6 +1042,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     g = sns.catplot(kind='box', data=df_plot, x='cond', y='value', col="feature_name", sharey=False, showfliers=False)
     plt.suptitle('RESP VOLUME')
     plt.tight_layout()
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     g.savefig("RESP_VOLUME.png")
@@ -965,6 +1054,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     g = sns.catplot(kind='box', data=df_plot, x='cond', y='end_tidal', sharey=False, showfliers=False)
     plt.suptitle('endtidal CO2')
     plt.tight_layout()
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     g.savefig("endtidalCO2.png")
@@ -974,6 +1064,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     g = sns.catplot(kind='box', data=df_plot, x='cond', y='end_tidal', sharey=False, showfliers=False)
     plt.suptitle('endtidal O2')
     plt.tight_layout()
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     g.savefig("endtidalO2.png")
@@ -997,6 +1088,7 @@ def preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srat
     ax.set_title('total_amplitude')
 
     plt.suptitle(sujet)
+    plt.rcParams.update({'font.size': 12})
     # plt.show()
 
     fig_summary.savefig(f"SUMMARY_{sujet}.png")
@@ -1098,6 +1190,404 @@ def extract_tdt(reader):
 
 
 
+
+
+
+################################
+######## NOSE / MOUTH ########
+################################
+
+
+
+def test_nose_mouth():
+
+    df = pd.read_csv(os.path.join(path_data, 'pilot', 'Jules_test_nose_mouth_clean.csv'))
+    
+    time_raw = df['Session Time'].values[1:]
+    flow_expi = df['Module 1: Raw Flow'].values[1:].astype(float)
+    pressure = df['Module 2: Raw Pressure'].values[1:].astype(float)
+    O2_raw = df['Internal Sensor: O2 Concentration'].values[1:].astype(float)
+    flow_inspi = df['Module 4: Raw Flow'].values[1:].astype(float)
+    trig = df['Digital I/O: Input 1'].values[1:].astype(float)
+    CO2_raw = df['Serial Port 1: CO2 Concentration'].values[1:].astype(float)
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+        x_scale = 2
+
+        plt.plot(scipy.stats.zscore(flow_expi[:select_time]), label='flow_expi')
+        plt.plot(scipy.stats.zscore(pressure[:select_time])+1*x_scale, label='pressure')
+        plt.plot(scipy.stats.zscore(O2[:select_time])+2*x_scale, label='O2')
+        plt.plot(scipy.stats.zscore(flow_inspi[:select_time])+3*x_scale, label='flow_inspi')
+        plt.plot(scipy.stats.zscore(trig[:select_time])+4*x_scale, label='trig')
+        plt.plot(scipy.stats.zscore(CO2[:select_time])+5*x_scale, label='CO2')
+        plt.legend()
+        plt.show()
+
+        plt.plot(flow_expi[:select_time], label='flow_expi')
+        plt.plot(flow_inspi[:select_time], label='flow_inspi')
+        plt.legend()
+        plt.show()
+
+        plt.plot(O2[:select_time], label='O2')
+        plt.plot(O2_raw[:select_time], label='O2_raw')
+        plt.legend()
+        plt.show()
+
+        plt.plot(CO2[:select_time], label='CO2')
+        plt.plot(CO2_raw[:select_time], label='CO2_raw')
+        plt.legend()
+        plt.show()
+
+        plt.plot(scipy.stats.zscore(flow_expi), label='flow_expi')
+        # plt.plot(scipy.stats.zscore(pressure), label='pressure')
+        plt.plot(scipy.stats.zscore(CO2), label='CO2')
+        plt.legend()
+        plt.show()
+
+    #### constructing respi
+
+    respi = flow_inspi*-1 + flow_expi
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+        plt.plot(respi[:select_time])
+        plt.show()
+
+        plt.plot(scipy.stats.zscore(respi))
+        plt.plot(scipy.stats.zscore(trig))
+        plt.show()
+
+        plt.plot(scipy.stats.zscore(respi))
+        # plt.plot(scipy.stats.zscore(CO2))
+        plt.plot(scipy.stats.zscore(CO2_raw))
+        plt.show()
+
+    #### roll CO2 / O2
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+
+        plt.plot(flow_expi[:select_time], label='flow_expi')
+        plt.plot(CO2_raw[:select_time], label='CO2_raw')
+        plt.legend()
+        plt.show()
+
+        plt.plot(flow_inspi[:select_time], label='flow_inspi')
+        plt.plot(O2_raw[:select_time], label='O2_raw')
+        plt.legend()
+        plt.show()
+
+    CO2_delay = -3 #sec
+    O2_delay = -1.5 #sec
+
+    O2 = np.roll(O2_raw, O2_delay*srate_sl)
+    CO2 = np.roll(CO2_raw, CO2_delay*srate_sl)
+
+    if debug:
+
+        select_time = 10*60*srate_sl
+        time_vec = np.arange(select_time) / srate_sl
+
+        plt.plot(flow_expi[:select_time], label='flow_expi')
+        plt.plot(CO2[:select_time], label='CO2_shift')
+        plt.legend()
+        plt.show()
+
+        plt.plot(flow_inspi[:select_time], label='flow_inspi')
+        plt.plot(O2[:select_time], label='O2_shift')
+        plt.legend()
+        plt.show()
+
+        plt.plot(time_vec, scipy.stats.zscore(respi[:select_time]), label='respi')
+        plt.plot(time_vec, scipy.stats.zscore(CO2[:select_time]), label='CO2_shift')
+        plt.legend()
+        plt.rcParams.update({'font.size': 12})
+        plt.show()
+
+    #### extract respi/CO2
+
+    if debug:
+
+        plt.plot(scipy.stats.zscore(trig))
+        plt.plot(scipy.stats.zscore(respi))
+        plt.show()
+
+        np.where(np.diff(trig) != 0)
+
+    trig_dict = trig_dict_pilote[sujet]
+
+    if debug:
+        
+        _sig = scipy.stats.zscore(respi)
+        plt.plot(_sig)
+        for cond1 in trig_dict:
+            for cond2 in trig_dict[cond1]:
+                plt.vlines(trig_dict[cond1][cond2], ymin=_sig.min()+_sig.std(), ymax=_sig.max()-_sig.std(), color='r')
+        plt.show()
+
+    data_dict_resp = {}
+    data_dict_CO2_raw = {}
+    data_dict_O2_raw = {}
+
+    for _device in trig_dict: 
+
+        data_dict_resp[_device] = {}
+        data_dict_CO2_raw[_device] = {}
+        data_dict_O2_raw[_device] = {}
+
+        for _cond in trig_dict[_device]:
+            
+            data_dict_resp[_device][_cond] = respi[trig_dict[_device][_cond][0]:trig_dict[_device][_cond][1]]
+            data_dict_CO2_raw[_device][_cond] = CO2[trig_dict[_device][_cond][0]:trig_dict[_device][_cond][1]]
+            data_dict_O2_raw[_device][_cond] = O2[trig_dict[_device][_cond][0]:trig_dict[_device][_cond][1]]
+
+    if sujet in ['jose', 'jules']:
+
+        trig_dict = trig_dict_pilote[sujet]
+
+    else:
+
+        trig_dict = trig_dict_allpatient[sujet]
+
+    #### preproc respi
+
+    data_dict_resp_clean = {}
+
+    for _device in trig_dict: 
+
+        data_dict_resp_clean[_device] = {}
+
+        for cond in trig_dict[_device]:
+
+            resp_clean = physio.preprocess(data_dict_resp[_device][cond], srate_sl, band=25., btype='lowpass', ftype='bessel', order=5, normalize=False)
+            resp_clean_smooth = physio.smooth_signal(resp_clean, srate_sl, win_shape='gaussian', sigma_ms=40.0)
+
+            data_dict_resp_clean[_device][cond] = resp_clean_smooth
+
+    #### correction respi timing to O2 / CO2
+    data_dict_CO2 = {}
+    data_dict_O2 = {}
+
+    dict_shift_CO2 = {}
+    dict_shift_O2 = {}
+
+    for _device in trig_dict: 
+
+        data_dict_CO2[_device] = {}
+        data_dict_O2[_device] = {}
+
+        dict_shift_CO2[_device] = {}
+        dict_shift_O2[_device] = {}
+
+
+        #cond = 'AoR-Co01'
+        for cond in trig_dict[_device]:
+            
+            _respi = data_dict_resp_clean[_device][cond]
+            _CO2 = data_dict_CO2_raw[_device][cond]
+            _O2 = data_dict_O2_raw[_device][cond]
+
+            _CO2_lag = find_best_lag(_respi, _CO2, srate_sl)
+            _O2_lag = find_best_lag(_respi, _O2, srate_sl)
+
+            data_dict_CO2[_device][cond] = np.roll(_CO2, _CO2_lag)
+            data_dict_O2[_device][cond] = np.roll(_O2, _O2_lag)
+
+            dict_shift_CO2[_device][cond] = _CO2_lag
+            dict_shift_O2[_device][cond] = _O2_lag
+
+    #### extract respfeatures
+
+    respfeatures = {}
+
+    for _device in trig_dict: 
+
+        respfeatures[_device] = {}
+
+        for cond in trig_dict[_device]:
+
+            _resp = data_dict_resp_clean[_device][cond]
+            _CO2 = data_dict_CO2[_device][cond]
+            _O2 = data_dict_O2[_device][cond]
+            
+            cycles = physio.detect_respiration_cycles(_resp, srate_sl, method="crossing_baseline", baseline_mode='zero')
+
+            resp_features_i = physio.compute_respiration_cycle_features(_resp, srate_sl, cycles, baseline=None)
+
+            select_vec = np.ones((resp_features_i.index.shape[0]), dtype='int')
+            resp_features_i.insert(resp_features_i.columns.shape[0], 'select', select_vec)
+
+            time_vec = np.arange(_resp.shape[0])/srate_sl
+
+            #### fig final
+            fig_final_resp, ax = plt.subplots(figsize=(18, 10))
+            ax.plot(time_vec, _resp)
+            ax.scatter(cycles[:,0]/srate_sl, _resp[cycles[:,0]], color='g', label='inspi_selected')
+            ax.scatter(cycles[:,1]/srate_sl, _resp[cycles[:,1]], color='c', label='expi_selected', marker='s')
+            plt.legend()
+            plt.title(f"{_device}, {cond}")
+            plt.rcParams.update({'font.size': 12})
+            plt.show()
+
+            fig_final_CO2, ax = plt.subplots(figsize=(18, 10))
+            ax.plot(time_vec, _CO2)
+            ax.scatter(cycles[:,0]/srate_sl, _CO2[cycles[:,0]], color='g', label='inspi_selected')
+            ax.scatter(cycles[:,1]/srate_sl, _CO2[cycles[:,1]], color='c', label='expi_selected', marker='s')
+            plt.legend()
+            plt.title(f"{_device}, {cond}")
+            plt.rcParams.update({'font.size': 12})
+            plt.show()
+
+            fig_final_O2, ax = plt.subplots(figsize=(18, 10))
+            ax.plot(time_vec, _O2)
+            ax.scatter(cycles[:,0]/srate_sl, _O2[cycles[:,0]], color='g', label='inspi_selected')
+            ax.scatter(cycles[:,1]/srate_sl, _O2[cycles[:,1]], color='c', label='expi_selected', marker='s')
+            plt.legend()
+            plt.title(f"{_device}, {cond}")
+            plt.rcParams.update({'font.size': 12})
+            plt.show()
+            
+            respfeatures[_device][cond] = [resp_features_i]
+
+    #### stretch respi
+
+    data_dict_resp_epoch = {}
+    data_dict_CO2_epoch = {}
+    data_dict_O2_epoch = {}
+
+    for _device in trig_dict: 
+
+        data_dict_resp_epoch[_device] = {}
+        data_dict_CO2_epoch[_device] = {}
+        data_dict_O2_epoch[_device] = {}
+
+        for cond in trig_dict[_device]:
+
+            _respfeature = respfeatures[_device][cond][0]
+            _resp = data_dict_resp_clean[_device][cond]
+            _CO2 = data_dict_CO2[_device][cond]
+            _O2 = data_dict_O2[_device][cond]
+
+            time_vec = np.arange(-5, 5, 1/srate_sl)
+
+            _cycle_sel_i = []
+
+            for _cycle_i in range(_respfeature.shape[0]):
+                
+                if _respfeature.iloc[_cycle_i]['expi_index'] - time_vec.size/2 < 0 or _respfeature.iloc[_cycle_i]['expi_index'] + time_vec.size/2 > _resp.size:
+                    continue
+                else:
+                    _cycle_sel_i.append(_cycle_i)
+
+            _cycle_sel_i = np.array(_cycle_sel_i)
+
+            _resp_epoch = np.zeros((_cycle_sel_i.size, time_vec.size))
+            _CO2_epoch = np.zeros((_cycle_sel_i.size, time_vec.size))
+            _O2_epoch = np.zeros((_cycle_sel_i.size, time_vec.size))
+            
+            for _epoch_i, _cycle_i in enumerate(_cycle_sel_i):
+                    
+                _start, _stop = int(_respfeature.iloc[_cycle_i]['expi_index'] - time_vec.size/2), int(_respfeature.iloc[_cycle_i]['expi_index'] + time_vec.size/2)
+                _resp_epoch[_epoch_i] = _resp[_start:_stop]
+                _CO2_epoch[_epoch_i] = _CO2[_start:_stop]
+                _O2_epoch[_epoch_i] = _O2[_start:_stop]
+
+            if debug:
+                plt.plot(_resp_epoch.mean(axis=0))
+                plt.show()
+
+                plt.plot(_CO2_epoch.mean(axis=0))
+                plt.show()
+
+                plt.plot(_O2_epoch.mean(axis=0))
+                plt.show()
+
+            data_dict_resp_epoch[_device][cond] = _resp_epoch
+            data_dict_CO2_epoch[_device][cond] = _CO2_epoch
+            data_dict_O2_epoch[_device][cond] = _O2_epoch
+
+    #### export mean fig
+
+    cond_device_list = ['AoRo', 'AoR-', 'A+Ro']
+
+    os.chdir(os.path.join(path_results, 'respi', 'nose_mouth'))
+
+    for cond in cond_device_list: 
+
+        fig_mean_resp, ax = plt.subplots()
+
+        for _device in trig_dict:
+
+            _data_epoch = data_dict_resp_epoch[_device][cond]
+            _mean = _data_epoch.mean(axis=0)
+            _std = _data_epoch.std(axis=0)
+            (line,) = ax.plot(time_vec, _mean, label=f"{_device} n:{_data_epoch.shape[0]}")
+            ax.fill_between(time_vec, _mean - _std, _mean + _std, color=line.get_color(), alpha=0.1)
+
+        plt.legend()
+        plt.title(f'RESP {cond}')
+        plt.rcParams.update({'font.size': 12})
+        # plt.show() 
+
+        fig_mean_resp.savefig(f"MEAN_RESP_{cond}.jpeg")
+
+    for cond in cond_device_list: 
+
+        fig_mean_CO2, ax = plt.subplots()
+
+        for _device in trig_dict:
+
+            _data_epoch = data_dict_CO2_epoch[_device][cond]
+            _mean = _data_epoch.mean(axis=0)
+            _std = _data_epoch.std(axis=0)
+            (line,) = ax.plot(time_vec, _mean, label=f"{_device} n:{_data_epoch.shape[0]}")
+            ax.fill_between(time_vec, _mean - _std, _mean + _std, color=line.get_color(), alpha=0.1)
+
+        plt.legend()
+        plt.title(f'CO2 {cond}')
+        plt.rcParams.update({'font.size': 12})
+        # plt.show() 
+
+        fig_mean_CO2.savefig(f"MEAN_CO2_{cond}.jpeg")
+
+    for cond in cond_device_list: 
+
+        fig_mean_O2, ax = plt.subplots()
+
+        for _device in trig_dict:
+
+            _data_epoch = data_dict_O2_epoch[_device][cond]
+            _mean = _data_epoch.mean(axis=0)
+            _std = _data_epoch.std(axis=0)
+            (line,) = ax.plot(time_vec, _mean, label=f"{_device} n:{_data_epoch.shape[0]}")
+            ax.fill_between(time_vec, _mean - _std, _mean + _std, color=line.get_color(), alpha=0.1)
+
+        plt.legend()
+        plt.title(f'O2 {cond}')
+        plt.rcParams.update({'font.size': 12})
+        # plt.show() 
+
+        fig_mean_O2.savefig(f"MEAN_O2_{cond}.jpeg")
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
 ################################
 ######## LOAD DATA ########
 ################################
@@ -1109,13 +1599,14 @@ if __name__ == '__main__':
     sujet = 'jules'
     sujet = 'jose'
     sujet = 'NS217'
+    sujet = 'test_aaron_params'
+    sujet = 'test_new_CO2_metric'
 
     data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw = load_physio_data(sujet, srate_sl)
 
-
     preproc_physio_sig(data_dict_resp, data_dict_CO2_raw, data_dict_O2_raw, srate_sl)
 
-
+    test_nose_mouth()
 
 
 
