@@ -17,7 +17,8 @@ conditions = ['RB', 'HV', 'AoRoCo', 'AoR-Co', 'A+RoCc', 'A+R-Cc', 'A+RoC-', 'A+R
 
 aux_chanlist = ['resp', 'co2', 'gsm']
 
-
+correspondance_cond = {'baseline' : 'RB', 'HV' : 'HV', '(1/2)A0(6)R-C0' : 'AoR-Co', '(1)A+(6)R-Cc' : 'A+R-Cc', '(2)A+(1)R0C-' : 'A+RoC-', '(2)A+(1)R0Cc' : 'A+RoCc', 
+                       '(2)A+(1)R0Cc' : 'A+RoCc', '(1)A0(1)R0C0' : 'AoRoCo', '(1)A+(6)R-C-' : 'A+R-C-'}
 
 ########################################
 ######## PATH DEFINITION ########
@@ -33,8 +34,8 @@ init_workdir = os.getcwd()
 
 if PC_ID == 'jules-ubuntu1':
 
-    path_main_workdir = '/home/jules/Documents/VCCL_JULES/Scripts'
-    path_general = '/home/jules/Documents/VCCL_JULES'
+    path_main_workdir = '/home/jules/Documents/VCCP_JULES/Scripts'
+    path_general = '/home/jules/Documents/VCCP_JULES'
     n_core = 25
 
     
@@ -45,19 +46,6 @@ path_precompute = os.path.join(path_general, 'Analyses', 'precompute')
 path_results = os.path.join(path_general, 'Analyses', 'results') 
 
 os.chdir(init_workdir)
-
-
-
-
-################################
-######## STRETCH ########
-################################
-
-stretch_TF_auto = False
-ratio_stretch_TF = 0.5
-
-nb_point_by_cycle = 500
-
 
 
 

@@ -1,0 +1,6 @@
+
+Process to add a patient
+
+@ Add auxchan in patient info : n03_0_patient_info
+
+

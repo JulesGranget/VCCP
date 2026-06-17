@@ -54,7 +54,17 @@ trig_dict_pilote = {'jules' :
         
                     }
 
+################################
+######## AUXCHAN ########
+################################
 
+auxchan_allsujet = {
+
+    'LH018' : ['TRIG', 'OSAT', 'PR', 'Pleth', 'respi', 'O2', 'CO2'],
+
+
+
+}
 
 
 

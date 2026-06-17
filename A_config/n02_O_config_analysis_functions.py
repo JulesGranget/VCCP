@@ -25,6 +25,7 @@ import seaborn as sns
 import neurokit2 as nk
 
 from A_config.n01_O_config_params import *
+from A_config.n03_O_patient_info import *
 
 
 debug = False
@@ -150,39 +151,29 @@ def get_chanlocalist(sujet):
     return df_loca_raw
 
 
+def get_df_loca(sujet):
+
+    path_plotloca = os.path.join(path_prep, sujet, 'anatomy', f"{sujet}_plot_loca.xlsx")
+    df_loca = pd.read_excel(path_plotloca)
+
+    return df_loca
+
+
+
+
+
 
 
 ########################################
 ######## LOAD RESPI FEATURES ########
 ########################################
 
-def load_respfeatures(sujet):
-
-    path_source = os.getcwd()
+def get_respfeatures(sujet):
     
-    os.chdir(os.path.join(path_results, 'RESPI', 'respfeatures'))
-    respfeatures_listdir = os.listdir()
+    path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond.xlsx")).drop(columns=['Unnamed: 0'])
 
-    #### get respi features
-    respfeatures_allcond = {}
-
-    for cond in cond_list:
-
-        load_i = []
-        for session_i, session_name in enumerate(respfeatures_listdir):
-            if session_name.find(cond) != -1 and session_name.find(sujet) != -1:
-                load_i.append(session_i)
-            else:
-                continue
-
-        load_list = [respfeatures_listdir[i] for i in load_i]
-
-        respfeatures_allcond[cond] = pd.read_excel(load_list[0])
-
-    #### go back to path source
-    os.chdir(path_source)
-
-    return respfeatures_allcond
+    return respfeature_allcond
 
 
 
@@ -333,66 +324,101 @@ def stretch_data_tf(resp_features, nb_point_by_cycle, data, srate):
 ######## CHANGE NAME CSV TRC ########
 ########################################
 
-#chan_list = prms['chan_list_ieeg']
-def modify_name(chan_list):
-    
-    chan_list_modified = []
-    chan_list_keep = []
 
-    for nchan in chan_list:
+def modify_loca_name(loca_list):
 
-        #### what we remove
-        if nchan.find("+") != -1:
-            continue
+    # loca_list = np.concatenate([get_chanlist(sujet)[1] for sujet in sujet_list])
 
-        if np.sum([str.isalpha(str_i) for str_i in nchan]) >= 2 and nchan.find('p') == -1:
-            continue
+    # np.unique([_loca[:3] for _loca in loca_list])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'ctx'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == '3rd'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Bra'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Lef'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Rig'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'par'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'inf'])
 
-        if nchan.find('ECG') != -1:
-            continue
+    # np.unique([_loca[7:] for _loca in loca_list if _loca[:3] == 'Ctx'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'ctx'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == '3rd'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Bra'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Lef'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'Rig'])
+    # np.unique([_loca for _loca in loca_list if _loca[:3] == 'par'])
 
-        if nchan.find('.') != -1:
-            continue
+    loca_list_corrected = []
 
-        if nchan.find('*') != -1:
-            continue
+    for _loca in loca_list:
 
-        #### what we do to chan we keep
+        if _loca[:3] == '3rd':
+            _type = 'csf'
+            _loca_corr = _loca
+            _side = 'csf'
+
+        elif _loca[:3] == 'Bra':
+            _type = 'gm'
+            _loca_corr = _loca
+            _side = _loca
+
+        elif _loca[:3] == 'ctx':
+            _type = 'gm'
+            if _loca[4:6] == 'lh':
+                _side = 'left'
+            elif _loca[4:6] == 'rh':
+                _side = 'right'
+            
+            if _loca[7:].split('-')[-1] in ['ant', 'pos']:
+                _loca_corr = _loca[7:]
+            else:
+                _loca_corr = _loca[7:].split('-')[0]
+
+        elif _loca[:3] == 'Lef':
+            _side = 'left'
+            if _loca[5:].find('Cerebral-White-Matter') != -1:
+                _type = 'wm'
+                _loca_corr = 'WM'
+            elif _loca[5:].find('Inf-Lat-Vent') != -1:
+                _type = 'csf'
+                _loca_corr = 'Inf-Lat-Vent'
+            else:
+                if _loca[5:].split('-')[-1] in ['ant', 'pos']:
+                    _type = 'gm'
+                    _loca_corr = _loca[5:]
+                else:
+                    _type = 'gm'
+                    _loca_corr = _loca[5:].split('-')[0]
+
+        elif _loca[:3] == 'Rig':
+            _side = 'right'
+            if _loca[6:].find('Cerebral-White-Matter') != -1:
+                _type = 'wm'
+                _loca_corr = 'WM'
+            elif _loca[6:].find('Inf-Lat-Vent') != -1:
+                _type = 'csf'
+                _loca_corr = 'Inf-Lat-Vent'
+            else:
+                if _loca[6:].split('-')[-1] in ['ant', 'pos']:
+                    _type = 'gm'
+                    _loca_corr = _loca[6:]
+                else:
+                    _type = 'gm'
+                    _loca_corr = _loca[6:].split('-')[0]
+            
+        elif _loca[:3] == 'Unk':
+            _type = 'unknown'
+            _loca_corr = 'unknown'
+            _side = 'unknown'
+
         else:
+            _type = f'UNSORTED_{_loca}'
+            _loca_corr = f'UNSORTED_{_loca}'
+            _side = f'UNSORTED_{_loca}'
 
-            nchan_mod = nchan.replace(' ', '')
-            nchan_mod = nchan_mod.replace("'", 'p')
+        loca_list_corrected.append([_loca_corr, _type, _side])
 
-            if nchan_mod.find('p') != -1:
-                split = nchan_mod.split('p')
-                letter_chan = split[0]
+    loca_list_corrected = np.array(loca_list_corrected)
 
-                if len(split[1]) == 1:
-                    num_chan = '0' + split[1] 
-                else:
-                    num_chan = split[1]
-
-                chan_list_modified.append(letter_chan + 'p' + num_chan)
-                chan_list_keep.append(nchan)
-                continue
-
-            if nchan_mod.find('p') == -1:
-                letter_chan = nchan_mod[0]
-
-                split = nchan_mod[1:]
-
-                if len(split) == 1:
-                    num_chan = '0' + split
-                else:
-                    num_chan = split
-
-                chan_list_modified.append(letter_chan + num_chan)
-                chan_list_keep.append(nchan)
-                continue
-
-
-    return chan_list_modified, chan_list_keep
-
+    return loca_list_corrected
 
 
 
