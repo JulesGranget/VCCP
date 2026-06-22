@@ -36,22 +36,6 @@ def export_data(sujet):
     #print(f.keys())
     data_prep = f['eeg_export'][:]
 
-    ########################
-    dset = f['eeg_export']
-
-    bad_chunks = []
-
-    for start in range(0, dset.shape[0], dset.chunks[0]):
-        stop = min(start + dset.chunks[0], dset.shape[0])
-        try:
-            _ = dset[start:stop, :]
-        except Exception as e:
-            print("Bad chunk:", start, stop, e)
-            bad_chunks.append((start, stop))
-
-    print("Number bad chunks:", len(bad_chunks))
-    ########################
-
     #### filter good chan
     select_chan = df_loca.query(f"select == 1")['chan'].values
     select_chan_i = np.array([np.where(chanlist_raw == chan)[0][0] for chan in select_chan])

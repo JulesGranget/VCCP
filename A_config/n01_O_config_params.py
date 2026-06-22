@@ -20,6 +20,13 @@ aux_chanlist = ['resp', 'co2', 'gsm']
 correspondance_cond = {'baseline' : 'RB', 'HV' : 'HV', '(1/2)A0(6)R-C0' : 'AoR-Co', '(1)A+(6)R-Cc' : 'A+R-Cc', '(2)A+(1)R0C-' : 'A+RoC-', '(2)A+(1)R0Cc' : 'A+RoCc', 
                        '(2)A+(1)R0Cc' : 'A+RoCc', '(1)A0(1)R0C0' : 'AoRoCo', '(1)A+(6)R-C-' : 'A+R-C-'}
 
+freq_band_dict = {'theta' : [4,8], 'alpha' : [8,12], 'beta' : [12,50], 'gamma' : [60, 150]}
+
+
+ROI_short_list = ['entorhinal', 'Amygdala', 'medialorbitofrontal', 'Hippocampus', 
+       'lateralorbitofrontal', 'Thalamus', 'posteriorcingulate',
+       'isthmuscingulate']
+
 ########################################
 ######## PATH DEFINITION ########
 ########################################
@@ -44,6 +51,7 @@ path_prep = os.path.join(path_general, 'Analyses', 'preprocessing')
 path_anatomy = os.path.join(path_general, 'Data', 'anatomy')
 path_precompute = os.path.join(path_general, 'Analyses', 'precompute') 
 path_results = os.path.join(path_general, 'Analyses', 'results') 
+path_memmap = os.path.join(path_general, 'memmap') 
 
 os.chdir(init_workdir)
 

@@ -109,8 +109,7 @@ def extract_respfeatures_and_mean_figures(sujet):
     
     #### load respi & CO2
     path_load_trial = os.path.join(path_prep, sujet, 'trial_exports')
-    trial_list = os.listdir(path_load_trial)
-
+    
     #cond = conditions[4]
     for cond in conditions:
 
@@ -302,8 +301,17 @@ def extract_respfeatures_and_mean_figures(sujet):
         fig_mean.savefig(os.path.join(path_export_mean_fig, f"{sujet}_stretch_mean.png"))
 
     #### export respfeature allcond
-    listdir_respfeatures = os.listdir(path_export_respfeatures)
-    load_list = [file for file in listdir_respfeatures if file.find('.xlsx') != -1]
+    path_trigger = os.path.join(path_prep, sujet, f"{sujet}_trigger.xlsx")
+    trial_info = pd.read_excel(path_trigger)
+    trial_info['cond'] = [correspondance_cond[_cond] for _cond in trial_info['cond'].values]
+    count_cond = {cond : 0 for cond in conditions}
+    trial_list = []
+    for trial in trial_info['cond']:
+
+        count_cond[trial] += 1
+        trial_list.append(f"{trial}_{count_cond[trial]}")
+
+    load_list = [f"{sujet}_{file}_respfeatures.xlsx" for file in trial_list]
     respfeatures_allcond = [pd.read_excel(os.path.join(path_export_respfeatures, file)) for file in load_list]
     respfeatures_allcond = pd.concat(respfeatures_allcond).drop(columns=['Unnamed: 0'])
     respfeatures_allcond = respfeatures_allcond.reset_index(drop=True)
@@ -315,35 +323,18 @@ def extract_respfeatures_and_mean_figures(sujet):
 
 
 #sujet = sujet_list[0]
-def export_cond_relabeling_fig(sujet):
+def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
     #### load respfeatures
     respfeatures_allcond = get_respfeatures(sujet)
 
-    #### get cond labels
-    A_label = []
-    R_label = []
-    C_label = []
-
-    for cond in respfeatures_allcond_raw_import['cond']:
-
-        A_label.append(cond[1])
-        R_label.append(cond[3])
-        C_label.append(cond[5])
-        
-    cond_label = pd.DataFrame({'A_raw' : A_label, 'R_raw' : R_label, 'C_raw' : C_label})
-    respfeatures_allcond_labeled_raw = pd.concat([respfeatures_allcond_raw_import.reset_index(), cond_label], axis=1).drop(columns=['index', 'Unnamed: 0'])
-
     #### params stats
-    rf_metrics_bothphase = ['cycle_duration', 'inspi_duration', 'expi_duration', 'cycle_freq', 'cycle_ratio', 'inspi_volume',
-       'expi_volume', 'total_amplitude', 'inspi_amplitude', 'expi_amplitude','total_volume', 'CO2_amp']
-    rf_metrics_fullcycle = ['cycle_duration', 'cycle_freq', 'total_amplitude', 'total_volume', 'CO2_amp']
-    info_columns_raw = ['trial', 'cond', 'A_raw', 'R_raw', 'C_raw', 'rf_metric', 'rf_metric_val']
-    info_columns_relabel = ['trial', 'rf_metric', 'rf_metric_val', 'cond_relabel', 'A_relabel', 'R_relabel', 'C_relabel']
-    col_3d_plot_raw = ['cycle_freq', 'total_amplitude', 'CO2_amp', 'trial', 'cond', 'A_raw', 'R_raw', 'C_raw']
-    col_3d_plot_relabeled = ['cycle_freq', 'total_amplitude', 'CO2_amp', 'trial', 'cond_relabel', 'A_relabel', 'R_relabel', 'C_relabel']
+    rf_metrics_fullcycle = ['cycle_duration', 'cycle_freq', 'total_amplitude', 'total_volume', 'etCO2']
+    metrics_cycle_features = ['trial', 'cond', 'A_raw', 'R_raw', 'C_raw', 'rf_metric', 'rf_metric_val', 'A_relabel', 'R_relabel', 'C_relabel']
+    col_3d_plot_raw = ['cycle_freq', 'total_amplitude', 'etCO2', 'trial', 'cond', 'A_raw', 'R_raw', 'C_raw']
+    col_3d_plot_relabeled = ['cycle_freq', 'total_amplitude', 'etCO2', 'trial', 'cond_relabel', 'A_relabel', 'R_relabel', 'C_relabel']
 
-    #### relabelling
+    #### identify threshold
     # sd_factor = 0.5
     # Co_upT = np.median(endtidal_CO2.query(f"cond == 'AoRoCo'")['end_tidal'].values) + sd_factor * scipy.stats.median_abs_deviation(endtidal_CO2.query(f"cond == 'AoRoCo'")['end_tidal'].values)
     # Co_dwT = np.median(endtidal_CO2.query(f"cond == 'AoRoCo'")['end_tidal'].values) - sd_factor * scipy.stats.median_abs_deviation(endtidal_CO2.query(f"cond == 'AoRoCo'")['end_tidal'].values)
@@ -353,23 +344,34 @@ def export_cond_relabeling_fig(sujet):
     # Ro_dwT = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values) - sd_factor * scipy.stats.median_abs_deviation(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values)
 
     # baseline_sel_percentile_range = 60
-    # Ao_upT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['total_amplitude'].values, baseline_sel_percentile_range)
-    # Ao_dwT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['total_amplitude'].values, 0)
-    # Ro_upT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['cycle_freq'].values, 100)
-    # Ro_dwT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['cycle_freq'].values, 100-baseline_sel_percentile_range)
-    # Co_upT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['CO2_amp'].values, 100) 
-    # Co_dwT = np.percentile(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['CO2_amp'].values, 100-baseline_sel_percentile_range)
+    # Ao_upT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values, baseline_sel_percentile_range)
+    # Ao_dwT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values, 0)
+    # Ro_upT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values, 100)
+    # Ro_dwT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values, 100-baseline_sel_percentile_range)
+    # Co_upT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['etCO2'].values, 100) 
+    # Co_dwT = np.percentile(respfeatures_allcond.query(f"cond == 'AoRoCo'")['etCO2'].values, 100-baseline_sel_percentile_range)
 
-    A_sujet = np.median(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['total_amplitude'].values)
+    A_sujet = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values)
     hA_sujet, dA_sujet = A_sujet/2, 2*A_sujet
-    A_upT = (dA_sujet - A_sujet)*0.50 + A_sujet
-    A_dwT = (A_sujet - hA_sujet)*0.50 + hA_sujet
+    
+    if calibrating_param == 'solid':
+        A_upT = (dA_sujet - A_sujet)*0.50 + A_sujet
+        A_dwT = (A_sujet - hA_sujet)*0.50 + hA_sujet
+    elif calibrating_param == 'dynamic':
+        A_dA_diff = (np.median(respfeatures_allcond.query(f"cond == 'A+RoCc'")['total_amplitude'].values) - np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values))
+        A_upT = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values) + A_dA_diff / 2
+        A_hA_diff = (np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values) - np.median(respfeatures_allcond.query(f"cond == 'AoR-Co'")['total_amplitude'].values))
+        A_dwT = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values) - A_hA_diff / 2
 
-    R_sujet = np.median(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['cycle_freq'].values)
-    R_thresh = (R_sujet - 0.1)*0.50 + 0.1
+    R_sujet = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values)
+    if calibrating_param == 'solid':
+        R_thresh = (R_sujet - 0.1)*0.50 + 0.1
+    elif calibrating_param == 'dynamic':
+        R_hR_diff = (np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values) - np.median(respfeatures_allcond.query(f"cond == 'AoR-Co'")['cycle_freq'].values))
+        R_thresh = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['cycle_freq'].values) - R_hR_diff / 2
 
-    C_sujet = np.median(respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")['CO2_amp'].values)
-    C_hypo = np.median(respfeatures_allcond_labeled_raw.query(f"cond == 'A+RoC-'")['CO2_amp'].values)
+    C_sujet = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['etCO2'].values)
+    C_hypo = np.median(respfeatures_allcond.query(f"cond == 'A+RoC-'")['etCO2'].values)
     C_thresh = (C_sujet - C_hypo)*0.50 + C_hypo
 
     if sujet == 'NS217':
@@ -379,56 +381,63 @@ def export_cond_relabeling_fig(sujet):
         A_dwT /= 2
         A_upT /= 2
 
-        C_thresh = np.median(respfeatures_allcond_labeled_raw['CO2_amp'].values)
+        C_thresh = np.median(respfeatures_allcond['etCO2'].values)
 
     if debug:
 
+        med = np.median(respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values)
+        std = respfeatures_allcond.query(f"cond == 'AoRoCo'")['total_amplitude'].values.std()
+
         rf_metric = 'total_amplitude'
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")[rf_metric].values
+        data_plot = respfeatures_allcond.query(f"cond == 'AoRoCo'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='AoRoCo', alpha=0.5)
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'A+RoCc'")[rf_metric].values
+        data_plot = respfeatures_allcond.query(f"cond == 'A+RoCc'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='A+RoCc', alpha=0.5)
-        plt.vlines([hA_sujet, A_sujet, dA_sujet], ymin=0, ymax=count.max(), color='g', label='hA_sujet, A_sujet, dA_sujet')
-        plt.vlines([A_dwT, A_upT], ymin=0, ymax=count.max(), color='g', linestyles='--', label='A_dwT, A_upT')
+        data_plot = respfeatures_allcond.query(f"cond == 'AoR-Co'")[rf_metric].values
+        count, _, _ = plt.hist(data_plot, bins=50, label='A+AoR-Cc', alpha=0.5)
+        plt.vlines([hA_sujet, A_sujet, dA_sujet], ymin=0, ymax=count.max(), color='k', label='hA_sujet, A_sujet, dA_sujet')
+        plt.vlines([A_dwT, A_upT], ymin=0, ymax=count.max(), color='k', linestyles='--', label='A_dwT, A_upT')
+        plt.vlines([med-2*std, med+2*std], ymin=0, ymax=count.max(), color='r', linestyles='-', label='sd_dwT, sd_upT')
+        plt.title(calibrating_param)
         plt.legend()
         plt.show()
 
         rf_metric = 'cycle_freq'
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")[rf_metric].values
+        data_plot = respfeatures_allcond.query(f"cond == 'AoRoCo'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='AoRoCo', alpha=0.5)
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'AoR-Co'")[rf_metric].values
+        data_plot = respfeatures_allcond.query(f"cond == 'AoR-Co'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='AoR-Co', alpha=0.5)
         plt.vlines([R_sujet], ymin=0, ymax=count.max(), color='g', label='R_sujet')
         plt.vlines([R_thresh], ymin=0, ymax=count.max(), color='g', linestyles='--', label='R_sujet')
         plt.legend()
         plt.show()
 
-        rf_metric = 'CO2_amp'
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'AoRoCo'")[rf_metric].values
+        rf_metric = 'etCO2'
+        data_plot = respfeatures_allcond.query(f"cond == 'AoRoCo'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='AoRoCo', alpha=0.5)
-        data_plot = respfeatures_allcond_labeled_raw.query(f"cond == 'A+RoC-'")[rf_metric].values
+        data_plot = respfeatures_allcond.query(f"cond == 'A+RoC-'")[rf_metric].values
         count, _, _ = plt.hist(data_plot, bins=50, label='A+RoC-', alpha=0.5)
         plt.vlines([C_sujet], ymin=0, ymax=count.max(), color='g', label='C_sujet')
         plt.vlines([C_thresh], ymin=0, ymax=count.max(), color='g', linestyles='--', label='C_thresh')
         plt.legend()
         plt.show()
 
-    
-    relabel_R = (respfeatures_allcond_labeled_raw['cycle_freq'] < R_thresh).replace({True : '-', False : 'o'}).values
+    #### apply thresh
+    relabel_R = (respfeatures_allcond['cycle_freq'] < R_thresh).replace({True : '-', False : 'o'}).values
     relabel_A = np.full((relabel_R.size), fill_value='', dtype='object')
-    sel_05R = (respfeatures_allcond_labeled_raw['total_amplitude'] < A_dwT).values
+    sel_05R = (respfeatures_allcond['total_amplitude'] < A_dwT).values
     relabel_A[sel_05R] = '05A'
-    sel_2R = (respfeatures_allcond_labeled_raw['total_amplitude'] > A_upT).values
+    sel_2R = (respfeatures_allcond['total_amplitude'] > A_upT).values
     relabel_A[sel_2R] = '2A'
     sel_A = ~(sel_05R | sel_2R)
     relabel_A[sel_A] = 'A'
-    relabel_C = (respfeatures_allcond_labeled_raw['CO2_amp'] < C_thresh).replace({True : '-', False : 'o'}).values
+    relabel_C = (respfeatures_allcond['etCO2'] < C_thresh).replace({True : '-', False : 'o'}).values
     relabel_code = np.concat([relabel_A.reshape(-1,1), relabel_R.reshape(-1,1), relabel_C.reshape(-1,1)], axis=1)
 
     cond_code = {'AoRoCo' : ['A','o','o'], 'AoR-Co' : ['05A','-','o'], 'A+RoCc' : ['2A','o','o'], 
                  'A+R-Cc' : ['A','-','o'], 'A+RoC-' : ['2A','o','-'], 'A+R-C-' : ['A','-','-']}
     
-    respfeatures_allcond_labeled = respfeatures_allcond_labeled_raw.copy()
+    respfeatures_allcond_labeled = respfeatures_allcond.copy()
     respfeatures_allcond_labeled['A_relabel'] = relabel_A
     respfeatures_allcond_labeled['R_relabel'] = relabel_R
     respfeatures_allcond_labeled['C_relabel'] = relabel_C
@@ -444,60 +453,100 @@ def export_cond_relabeling_fig(sujet):
 
     cond_relabeled[~exclude_cycle_map] = 'excluded'
 
+    if debug:
+
+        df_plot = pd.concat([
+            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond'], 'type': 'raw'}),
+            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond_relabel'], 'type': 'relabel'})
+        ])
+
+        plt.figure(figsize=(12, 6))
+
+        sns.histplot(data=df_plot, x='cond', hue='type', multiple='dodge', shrink=.8)
+        plt.axhline(30, color='red', linestyle='--')
+
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.show()
+
     respfeatures_allcond_labeled['cond_relabel'] = cond_relabeled
     respfeatures_allcond_labeled['A_relabel'] = respfeatures_allcond_labeled['A_relabel'].replace({False : 'o', True : '+'})
     respfeatures_allcond_labeled['R_relabel'] = respfeatures_allcond_labeled['R_relabel'].replace({False : 'o', True : '-'})
     respfeatures_allcond_labeled['C_relabel'] = respfeatures_allcond_labeled['C_relabel'].replace({False : 'o', True : '-'})
 
-    os.chdir(os.path.join(path_results, 'respi', 'respfeatures', sujet))
-    respfeatures_allcond_labeled.to_excel(f"{sujet}_allcond_respfeatures_relabel.xlsx")
+    #### export respfeatures relabelled
+    path_export_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeatures_allcond_labeled.to_excel(os.path.join(path_export_respfeatures, f"respfeature_allcond_relabel.xlsx"))
 
     ######## PLOT ########
+
+    #### path
+    path_export_label = os.path.join(path_results, 'respi', 'relabel')
+
     #### export relabel modification plot
-    counts_cond = respfeatures_allcond_labeled["cond"].value_counts().rename("count").reset_index()
-    counts_cond_relabel = respfeatures_allcond_labeled["cond_relabel"].value_counts().rename("count").reset_index()
-    counts_cond_relabel = counts_cond_relabel.rename(columns={'cond_relabel' : 'cond'})
+    df_plot = pd.concat([
+            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond'], 'type': 'raw'}),
+            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond_relabel'], 'type': 'relabel'})
+        ])
 
-    counts_cond["source"] = "cond"
-    counts_cond_relabel["source"] = "cond_relabel"
+    fig_count = plt.figure(figsize=(10, 6))
 
-    df_counts = pd.concat([counts_cond, counts_cond_relabel], ignore_index=True)
+    sns.histplot(data=df_plot, x='cond', hue='type', multiple='dodge', shrink=.8)
+    plt.axhline(30, color='red', linestyle='--')
 
-    g = sns.catplot(df_counts, kind='bar', x='cond', y='count', hue='source')
-    plt.title(sujet)
+    plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
-    # plt.show()
+    plt.suptitle(calibrating_param)
+    #plt.show()
     
-    os.chdir(os.path.join(path_results, 'respi', 'stats_cycle_select'))
-    g.savefig(f"relabeled_{sujet}.png")
+    fig_count.savefig(os.path.join(path_export_label, f"relabeled_{sujet}.png"))
 
     #### export stats plot raw
-    df_plot = respfeatures_allcond_labeled.melt(id_vars=[c for c in respfeatures_allcond_labeled.columns if c not in rf_metrics_fullcycle],
-                                    value_vars=rf_metrics_fullcycle, var_name="rf_metric", value_name="rf_metric_val")[info_columns_raw]
-    df_plot = df_plot.melt(id_vars=[c for c in df_plot.columns if c not in ['A_raw', 'R_raw', 'C_raw']],
-                                    value_vars=['A_raw', 'R_raw', 'C_raw'], var_name="cond_label", value_name="cond_label_val")
+    A_raw, R_raw, C_raw = [], [], []
+    for _cond in respfeatures_allcond_labeled['cond']:
+        if _cond in ['RB', 'HV']:            
+            A_raw.append(_cond)
+            R_raw.append(_cond)
+            C_raw.append(_cond)
+        else:
+            A_raw.append(_cond[1])
+            R_raw.append(_cond[3])
+            C_raw.append(_cond[5])
+        
+    respfeatures_allcond_labeled['A_raw'], respfeatures_allcond_labeled['R_raw'], respfeatures_allcond_labeled['C_raw'] = A_raw, R_raw, C_raw
 
-    fig_raw_stats_fullcycle = sns.catplot(data=df_plot, kind='swarm', x='cond_label_val', y='rf_metric_val', col='rf_metric', row='cond_label', sharey=False)
+    df_plot = respfeatures_allcond_labeled.melt(id_vars=[c for c in respfeatures_allcond_labeled.columns if c not in rf_metrics_fullcycle],
+                                    value_vars=rf_metrics_fullcycle, var_name="rf_metric", value_name="rf_metric_val")[metrics_cycle_features]
+    
+    A_raw_update = []
+    for _cond in df_plot['cond']:
+        if _cond in ['RB', 'HV']:
+            A_raw_update.append(_cond)
+        else:
+            A_raw_update.append(cond_code[_cond][0])
+    df_plot['A_raw'] = A_raw_update   
+    
+    df_plot_raw = df_plot.melt(id_vars=[c for c in df_plot.columns if c not in ['A_raw', 'R_raw', 'C_raw']],
+                                    value_vars=['A_raw', 'R_raw', 'C_raw'], var_name="cond_label", value_name="cond_label_val")
+    df_plot_raw['cond_label'] = df_plot_raw['cond_label'].replace({'A_raw' : 'A', 'R_raw' : 'R', 'C_raw' : 'C'})
+    df_plot_raw['type'] = ['raw'] * df_plot_raw.shape[0]
+    
+    df_plot_rellabeled = df_plot.melt(id_vars=[c for c in df_plot.columns if c not in ['A_relabel', 'R_relabel', 'C_relabel']],
+                                    value_vars=['A_relabel', 'R_relabel', 'C_relabel'], var_name="cond_label", value_name="cond_label_val")
+    df_plot_rellabeled['cond_label'] = df_plot_rellabeled['cond_label'].replace({'A_relabel' : 'A', 'R_relabel' : 'R', 'C_relabel' : 'C'})
+    df_plot_rellabeled['type'] = ['rellabeled'] * df_plot_rellabeled.shape[0]
+
+    df_plot = pd.concat([df_plot_raw, df_plot_rellabeled]).reset_index(drop=True)
+    df_plot = df_plot.query(f"cond_label_val not in ['RB', 'HV']")
+    
+
+    fig_raw_stats_fullcycle = sns.catplot(data=df_plot, kind='strip', x='cond_label_val', y='rf_metric_val', col='rf_metric', 
+                                          row='cond_label', hue='type', sharey=False, dodge=True)
     fig_raw_stats_fullcycle.figure.suptitle(sujet)
     plt.tight_layout()
     # plt.show()
 
-    os.chdir(os.path.join(path_results, 'respi', 'stats_cycle_select'))
-    fig_raw_stats_fullcycle.savefig(f"fullcycle_stats_{sujet}_raw.png")
-
-    #### export stats plot relabel
-    df_plot = respfeatures_allcond_labeled.melt(id_vars=[c for c in respfeatures_allcond_labeled.columns if c not in rf_metrics_fullcycle],
-                                    value_vars=rf_metrics_fullcycle, var_name="rf_metric", value_name="rf_metric_val")[info_columns_relabel]
-    df_plot = df_plot.melt(id_vars=[c for c in df_plot.columns if c not in ['A_relabel', 'R_relabel', 'C_relabel']],
-                                    value_vars=['A_relabel', 'R_relabel', 'C_relabel'], var_name="cond_label", value_name="cond_label_val")
-
-    fig_relabel_stats_fullcycle = sns.catplot(data=df_plot, kind='swarm', x='cond_label_val', y='rf_metric_val', col='rf_metric', row='cond_label', sharey=False)
-    fig_relabel_stats_fullcycle.figure.suptitle(sujet)
-    plt.tight_layout()
-    # plt.show()
-
-    os.chdir(os.path.join(path_results, 'respi', 'stats_cycle_select'))
-    fig_relabel_stats_fullcycle.savefig(f"fullcycle_stats_{sujet}_relabel.png")
+    fig_raw_stats_fullcycle.savefig(os.path.join(path_export_label, f"fullcycle_stats_{sujet}.png"))
 
     #### 3d params
     color_cond = {
@@ -514,9 +563,11 @@ def export_cond_relabeling_fig(sujet):
 
     fig_raw = go.Figure()
 
-    for cond in conditions:
+    cond_sel = [cond for cond in conditions if cond not in ['RB', 'HV']]
+
+    for cond in cond_sel:
         _sel_vec = df_plot['cond'] == cond
-        _sel_CO2 = df_plot['CO2_amp'].values[_sel_vec]
+        _sel_CO2 = df_plot['etCO2'].values[_sel_vec]
         _sel_amp = df_plot['total_amplitude'].values[_sel_vec]
         _sel_freq = df_plot['cycle_freq'].values[_sel_vec]
 
@@ -546,17 +597,18 @@ def export_cond_relabeling_fig(sujet):
     )
 
     # fig_raw.show()
-    os.chdir(os.path.join(path_results, 'respi', 'stats_cycle_select'))
-    fig_raw.write_html(f"3d_{sujet}_allcond_raw.html")
+    fig_raw.write_html(os.path.join(path_export_label, f"3d_{sujet}_allcond_raw.html"))
 
     #### 3d relabeled cond sel
     df_plot = respfeatures_allcond_labeled[col_3d_plot_relabeled]
 
+    cond_sel = [cond for cond in conditions if cond not in ['RB', 'HV']]
+
     fig_relabeled = go.Figure()
 
-    for cond in conditions:
+    for cond in cond_sel:
         _sel_vec = df_plot['cond_relabel'] == cond
-        _sel_CO2 = df_plot['CO2_amp'].values[_sel_vec]
+        _sel_CO2 = df_plot['etCO2'].values[_sel_vec]
         _sel_amp = df_plot['total_amplitude'].values[_sel_vec]
         _sel_freq = df_plot['cycle_freq'].values[_sel_vec]
 
@@ -582,12 +634,11 @@ def export_cond_relabeling_fig(sujet):
         width=900,
         height=700,
         title={'text':"RELABELED", 'x':0.5, 'xanchor':"center", 'yanchor':"top", 'y':0.95}
-
     )
 
     # fig_relabeled.show()
-    os.chdir(os.path.join(path_results, 'respi', 'stats_cycle_select'))
-    fig_relabeled.write_html(f"3d_{sujet}_allcond_relabeled.html")
+    fig_relabeled.write_html(os.path.join(path_export_label, f"3d_{sujet}_allcond_relabeled.html"))
+
 
 
 
@@ -607,8 +658,10 @@ if __name__ == '__main__':
     sujet = 'NS217'
     sujet = 'LH018'
 
-    extract_respfeatures_and_mean_figures(sujet)
-    export_cond_relabeling_fig(sujet)
+    for sujet in sujet_list:
+
+        extract_respfeatures_and_mean_figures(sujet)
+        export_cond_relabeling_fig(sujet)
 
 
 

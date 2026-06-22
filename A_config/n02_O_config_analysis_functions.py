@@ -143,6 +143,44 @@ def load_data_sujet(sujet, cond):
 
 
 
+
+def get_chanlist_localist(sujet):
+
+    path_load_trial = os.path.join(path_prep, sujet, 'trial_exports')
+    trial_name = f"{sujet}_RB_1.nc"
+    xr_data = xr.load_dataarray(os.path.join(path_load_trial, trial_name))
+    chanlist_all = xr_data['chan'].values
+    chanlist_aux = np.array(auxchan_allsujet[sujet])
+    chanlist = np.array([chan for chan in chanlist_all if chan not in chanlist_aux])
+
+    path_load_loca = os.path.join(path_prep, sujet, 'anatomy', f"{sujet}_plot_loca.xlsx")
+    localist = pd.read_excel(path_load_loca)
+    localist = localist.query(f"select == 1")[['chan', 'FS_volumetric_corrected']]
+    localist = localist.rename(columns={'FS_volumetric_corrected' : 'loca'})
+
+    return chanlist, chanlist_aux, chanlist_all, localist
+
+
+
+
+def get_alltrials_sujet(sujet):
+
+    path_trigger = os.path.join(path_prep, sujet, f"{sujet}_trigger.xlsx")
+    trial_info = pd.read_excel(path_trigger)
+    trial_info['cond'] = [correspondance_cond[_cond] for _cond in trial_info['cond'].values]
+
+    count_cond = {cond : 0 for cond in conditions}
+    trial_list = []
+    for trial in trial_info['cond']:
+
+        count_cond[trial] += 1
+        trial_list.append(f"{trial}_{count_cond[trial]}")
+
+    return trial_list
+
+
+
+
 def get_chanlocalist(sujet):
 
     path_filechanloca = os.path.join(path_anatomy, f"{sujet}_locafile.xlsx")
@@ -174,6 +212,15 @@ def get_respfeatures(sujet):
     respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond.xlsx")).drop(columns=['Unnamed: 0'])
 
     return respfeature_allcond
+
+
+
+def get_respfeatures_relabel(sujet):
+    
+    path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeature_allcond_relabel = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_relabel.xlsx")).drop(columns=['Unnamed: 0'])
+
+    return respfeature_allcond_relabel
 
 
 
@@ -275,7 +322,7 @@ def stretch_data(resp_features, nb_point_by_cycle, data, srate):
 
 
 
-#resp_features, nb_point_by_cycle, data, srate = respfeatures, stretch_point_ERP, tf_load, srate
+#resp_features, nb_point_by_cycle, data, srate = respfeature_trial, stretch_point_TF, tf_allconv_norm[chan_i], srate
 def stretch_data_tf(resp_features, nb_point_by_cycle, data, srate):
 
     #### params

@@ -1,679 +1,356 @@
 
 
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import scipy.signal
-import mne
-import pandas as pd
+import joblib
+import plotly
 
 from A_config.n01_O_config_params import *
 from A_config.n02_O_config_analysis_functions import *
 from A_config.n03_O_patient_info import *
 
-debug = False
-
-
-
-########################################
-######## TO DELETE LATER ########
-########################################
-
-#resp = respi
-def debugged_detect_respiration_cycles(resp, srate, baseline_mode='manual', baseline=None, 
-                              epsilon_factor1=10, epsilon_factor2=5, inspiration_adjust_on_derivative=False):
-    """
-    Detect respiration cycles based on:
-      * crossing zeros (or crossing baseline)
-      * some cleanning with euristicts
-
-    Parameters
-    ----------
-    resp: np.array
-        Preprocess traces of respiratory signal.
-    srate: float
-        Sampling rate
-    baseline_mode: 'manual' / 'zero' / 'median' / 'mode'
-        How to compute the baseline for zero crossings.
-    baseline: float or None
-        External baseline when baseline_mode='manual'
-    inspration_ajust_on_derivative: bool (default False)
-        For the inspiration detection, the zero crossing can be refined to auto detect the inflection point.
-        This can be usefull when expiration ends with a long plateau.
-    Returns
-    -------
-    cycles: np.array
-        Indices of inspiration and expiration. shape=(num_cycle, 3)
-        with [index_inspi, index_expi, index_next_inspi]
-    """
-
-    baseline = physio.get_respiration_baseline(resp, srate, baseline_mode=baseline_mode, baseline=baseline)
-
-    #~ q90 = np.quantile(resp, 0.90)
-    q10 = np.quantile(resp, 0.10)
-    epsilon = (baseline - q10) / 100.
-
-    baseline_dw = baseline - epsilon * epsilon_factor1
-    baseline_insp = baseline - epsilon * epsilon_factor2
-
-    resp0 = resp[:-1]
-    resp1 = resp[1:]
-
-    ind_dw, = np.nonzero((resp0 >= baseline_dw) & (resp1 < baseline_dw))
-    
-    ind_insp, = np.nonzero((resp0 >= baseline_insp) & (resp1 < baseline_insp))
-    ind_insp_no_clean = ind_insp.copy()
-    keep_inds = np.searchsorted(ind_insp, ind_dw, side='left')
-    keep_inds = keep_inds[keep_inds > 0]
-    ind_insp = ind_insp[keep_inds - 1]
-    ind_insp = np.unique(ind_insp)
-
-    ind_exp, = np.nonzero((resp0 < baseline) & (resp1 >= baseline))
-    keep_inds = np.searchsorted(ind_exp, ind_insp, side='right')
-    keep_inds = keep_inds[keep_inds<ind_exp.size]
-    ind_exp = ind_exp[keep_inds]
-    
-    # this is tricky to read but quite simple in concept
-    # this remove ind_exp assigned to the same ind_insp
-    bad, = np.nonzero(np.diff(ind_exp) == 0)
-    keep = np.ones(ind_insp.size, dtype='bool')
-    keep[bad + 1] = False
-    ind_insp = ind_insp[keep]
-    keep = np.ones(ind_exp.size, dtype='bool')
-    keep[bad + 1] = False
-    ind_exp = ind_exp[keep]
-
-    #~ import matplotlib.pyplot as plt
-    # fig, ax = plt.subplots()
-    # ax.plot(resp)
-    # ax.scatter(ind_insp_no_clean, resp[ind_insp_no_clean], color='m', marker='*', s=100)
-    # ax.scatter(ind_dw, resp[ind_dw], color='orange', marker='o', s=30)
-    # ax.scatter(ind_insp, resp[ind_insp], color='g', marker='o')
-    # ax.scatter(ind_exp, resp[ind_exp], color='r', marker='o')
-    # ax.axhline(baseline, color='r')
-    # ax.axhline(baseline_insp, color='g')
-    # ax.axhline(baseline_dw, color='orange')
-    # ax.axhline(q10, color='k')
-    # plt.show()
-
-
-    if ind_insp.size == 0:
-        print('no cycle dettected')
-        return
-
-
-    mask = (ind_exp > ind_insp[0]) & (ind_exp < ind_insp[-1])
-    ind_exp = ind_exp[mask]
-
-    if inspiration_adjust_on_derivative:
-        # lets find local minima on second derivative
-        # this can be slow
-        delta_ms = 10.
-        delta = int(delta_ms * srate / 1000.)
-        derivate1 = np.gradient(resp)
-        derivate2 = np.gradient(derivate1)
-        for i in range(ind_exp.size):
-            i0, i1 = ind_insp[i], ind_exp[i]
-            i0 = max(0, i0 - delta)
-            i1 = i0 + np.argmin(resp[i0:i1])
-            d1 = derivate1[i0:i1]
-            i1 = i0 + np.argmin(d1)
-            if (i1 - i0) >2:
-                # find the last crossing zeros in this this short segment
-                d2 = derivate2[i0:i1]
-                i1 = i0 + np.argmin(d2)
-                if (i1 - i0) >2:
-                    d2 = derivate2[i0:i1]
-                    mask = (d2[:-1] >=0) & (d2[1:] < 0)
-                    if np.any(mask):
-                        ind_insp[i] = i0 + np.nonzero(mask)[0][-1]
-
-    if ind_insp[-1] >= ind_exp[-1] and ind_insp[-2] >= ind_exp[-1]:
-        ind_insp = ind_insp[:-1]
-    
-    cycles = np.zeros((ind_insp.size - 1, 3), dtype='int64')
-    cycles[:, 0] = ind_insp[:-1]
-    cycles[:, 1] = ind_exp
-    cycles[:, 2] = ind_insp[1:]
-
-    return cycles
 
 
 
 
-########################################
-######## COMPUTE RESPI FEATURES ########
-########################################
 
 
 
-#cycles_init = cycles
-def exclude_bad_cycles(respi, cycles_init, srate, exclusion_coeff=1):
+################################
+######## PRECOMPUTE TF ########
+################################
 
-    if debug:
-        plt.plot(respi, label='respi')
-        plt.scatter(cycles_init[:,0], respi[cycles_init[:,0]], color='g', label='inspi')
-        plt.scatter(cycles_init[:,1], respi[cycles_init[:,1]], color='r', label='expi')
-        plt.scatter(cycles_init[:,2], respi[cycles_init[:,2]], color='b', label='next_inspi')
-        plt.legend()
-        plt.show()
+#sujet, norm_param = sujet_list[0], 'rscore'
+def precompute_tf(sujet, norm_param):
 
-    #### compute average durations and dispertion for inspi and expi together
-    all_inspi_expi = np.diff(cycles_init, axis=1).reshape(-1)
-    duration_med = int(np.median(all_inspi_expi))
-    duration_mad = int(np.median(np.abs(all_inspi_expi - duration_med)) / 0.6744897501960817)
+    #### get trial names
+    trial_list = get_alltrials_sujet(sujet)
 
-    #### compute average inspi/expi cycle for cross correlation
-    time_vec_mean_cycle = np.arange(-duration_med, duration_med)
-    cycle_average_inspi = np.zeros((cycles_init.shape[0], time_vec_mean_cycle.size))
-    cycle_average_expi = np.zeros((cycles_init.shape[0], time_vec_mean_cycle.size)) 
+    #### precompute
+    #trial = trial_list[5]
+    for trial in trial_list:
+        
+        #### config
+        path_export_TF = os.path.join(path_precompute, 'TF', sujet)
+        path_load_trial = os.path.join(path_prep, sujet, 'trial_exports')
 
-    for _inspi_start_i, _inspi_start in enumerate(cycles_init[:,0]):
-        _start, _stop = _inspi_start - duration_med, _inspi_start + duration_med  
-        if _start < 0 or  _stop < 0 or _start > respi.size or _stop > respi.size:
-            continue
-        cycle_average_inspi[_inspi_start_i, :] = respi[_start:_stop]
-
-    for _expi_start_i, _expi_start in enumerate(cycles_init[:,1]):
-        _start, _stop = _expi_start - duration_med, _expi_start + duration_med  
-        if _start < 0 or _stop < 0 or _start > respi.size or _stop > respi.size:
-            continue
-        cycle_average_expi[_expi_start_i, :] = respi[_start:_stop]
-
-    sel_i_inspi = np.where(np.sum(cycle_average_inspi, axis=1) != 0)[0]
-    sel_i_expi = np.where(np.sum(cycle_average_expi, axis=1) != 0)[0]
-
-    cycle_average_inspi = np.median(cycle_average_inspi[sel_i_inspi, :], axis=0)
-    cycle_average_expi = np.median(cycle_average_expi[sel_i_expi, :], axis=0)
-
-    if debug:
-        plt.plot(time_vec_mean_cycle/srate, cycle_average_inspi)
-        plt.plot(time_vec_mean_cycle/srate, cycle_average_expi)
-        plt.show()
-
-    #### cross correlate respi with average inspi/expi cycle and identify max
-    correlate_inspi = scipy.signal.correlate(respi, cycle_average_inspi, mode='same')
-    correlate_expi = scipy.signal.correlate(respi, cycle_average_expi, mode='same')
-    
-    peak_thresh_inspi = np.std(correlate_inspi)*0.5
-    cross_corr_inspi = scipy.signal.find_peaks(correlate_inspi, distance=duration_med, height=peak_thresh_inspi)[0]
-
-    peak_thresh_expi = np.std(correlate_expi)*0.5
-    cross_corr_expi = scipy.signal.find_peaks(correlate_expi, distance=duration_med, height=peak_thresh_expi)[0]
-
-    if debug:
-        plt.plot(correlate_inspi)
-        plt.scatter(cross_corr_inspi, correlate_inspi[cross_corr_inspi], color='r')
-        plt.hlines(peak_thresh_inspi, xmin=0, xmax=correlate_inspi.size, color='r')
-        plt.show()
-
-        respi_zscore = zscore(respi)
-        correlate_inspi_zscore = zscore(correlate_inspi)
-        correlate_expi_zscore = zscore(correlate_expi)
-
-        plt.plot(respi_zscore, label='respi')
-        plt.plot(correlate_inspi_zscore, label='cross_corr_inspi')
-        plt.plot(correlate_expi_zscore, label='cross_corr_expi')
-        plt.scatter(cross_corr_inspi, respi_zscore[cross_corr_inspi], color='r', label='cross_corr')
-        plt.scatter(cross_corr_expi, respi_zscore[cross_corr_expi], color='r')
-        plt.scatter(cycles_init[:,1], respi_zscore[cycles_init[:,1]], color='b', label='cycles_init')
-        plt.scatter(cycles_init[:,0], respi_zscore[cycles_init[:,0]], color='b')
-        plt.legend()
-        plt.show()
-
-    #### correct inspi/expi position based on cross correlation with dispertion coeff
-    exclusion_thresh = int(exclusion_coeff * duration_mad)
-
-    inspi_corrected = []
-
-    for inspi_cross_corr_i, inspi_cross_corr in enumerate(cross_corr_inspi):
-
-        _up, _down = inspi_cross_corr + exclusion_thresh, inspi_cross_corr - exclusion_thresh
-        mask_thresh = (cycles_init[:,0] <= _up) & (cycles_init[:,0] >= _down)
-        if mask_thresh.sum() != 0:
-            _inspi_init = int(np.median(cycles_init[:,0][mask_thresh]))
-            inspi_corrected.append(_inspi_init)
+        if os.path.exists(os.path.join(path_export_TF, f"{sujet}_{trial}_TF_conv.npy")):
+            print(f'{sujet} {trial} ALREADY COMPUTED', flush=True)
+            return
         else:
-            inspi_corrected.append(inspi_cross_corr)
+            print(f'TF PRECOMPUTE {sujet} {trial}', flush=True)
 
-    inspi_corrected = np.array(inspi_corrected)
+        trial_name = f"{sujet}_{trial}.nc"
 
-    if debug:
-        plt.plot(respi)
-        for inspi_cross_corr in cross_corr_inspi:
-            _up, _down = inspi_cross_corr + exclusion_thresh, inspi_cross_corr - exclusion_thresh
-            plt.vlines([_up, _down], ymin=respi.min(), ymax=respi.max(), color='r')
-        plt.scatter(cycles_init[:,0], respi[cycles_init[:,0]], color='b', label='cycles_init_inspi')
-        plt.scatter(cross_corr_inspi, respi[cross_corr_inspi], color='r', label='cross_corr_inspi')
-        plt.scatter(inspi_corrected, respi[inspi_corrected], color='g', label='corrected_inspi', marker='x', s=100)
-        plt.legend()
-        plt.show()
+        xr_data = xr.load_dataarray(os.path.join(path_load_trial, trial_name))
+        chanlist, chanlist_aux, chanlist_all, localist = get_chanlist_localist(sujet)
+        resp = xr_data.sel(chan='respi').data
+        CO2 = xr_data.sel(chan='CO2').data
+        
+        #### select wavelet parameters
+        wavelets = get_wavelets()
 
-    expi_corrected = []
+        #### compute
+        print('CONV', flush=True)
 
-    for expi_cross_corr_i, expi_cross_corr in enumerate(cross_corr_expi):
+        tf_allconv = np.memmap(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_tf_conv.npy'), mode="w+", shape=(len(chanlist), nfrex, xr_data.shape[-1]), dtype=np.float32)
+                
+        #chan_i, chan = 0, chanlist[0]
+        # for chan_i, _ in enumerate(chanlist):
+        def extract_chan_conv(chan_i,chan):
 
-        _up, _down = expi_cross_corr + exclusion_thresh, expi_cross_corr - exclusion_thresh
-        mask_thresh = (cycles_init[:,1] <= _up) & (cycles_init[:,1] >= _down)
-        if mask_thresh.sum() != 0:
-            _expi_init = int(np.median(cycles_init[:,1][mask_thresh]))
-            expi_corrected.append(_expi_init)
-        else:
-            expi_corrected.append(expi_cross_corr)
+            print_advancement(chan_i, len(chanlist), steps=[25, 50, 75])
 
-    expi_corrected = np.array(expi_corrected)
+            for fi in range(nfrex):
+                
+                tf_allconv[chan_i, fi] = abs(scipy.signal.fftconvolve(xr_data.sel(chan=chan).values, wavelets[fi], 'same'))**2
 
-    if debug:
-        plt.plot(respi)
-        for expi_cross_corr in cross_corr_expi:
-            _up, _down = expi_cross_corr + exclusion_thresh, expi_cross_corr - exclusion_thresh
-            plt.vlines([_up, _down], ymin=respi.min(), ymax=respi.max(), color='r')
-        plt.scatter(cycles_init[:,1], respi[cycles_init[:,1]], color='b', label='cycles_init_expi')
-        plt.scatter(cross_corr_expi, respi[cross_corr_expi], color='r', label='cross_corr_expi')
-        plt.scatter(expi_corrected, respi[expi_corrected], color='g', label='corrected_expi', marker='x', s=100)
-        plt.legend()
-        plt.show()
+        joblib.Parallel(n_jobs = n_core, prefer = 'processes')(joblib.delayed(extract_chan_conv)(chan_i,chan) for chan_i, chan in enumerate(chanlist))
 
-    if debug:
-        plt.plot(respi)
-        plt.scatter(inspi_corrected, respi[inspi_corrected], color='g', label='inspi')
-        plt.scatter(expi_corrected, respi[expi_corrected], color='r', label='expi')
-        plt.legend()
-        plt.show()
+        #### extract and norm
+        print(f'NORM PARAMS', flush=True)
 
-    #### verify that detection start and stop by inspi 
-    if expi_corrected[0] < inspi_corrected[0]:
-        inspi_corrected = np.insert(inspi_corrected, 0, cycles_init[0,0])
+        if norm_param == 'rscore':
 
-    if expi_corrected[-1] > inspi_corrected[-1]:
-        expi_corrected = expi_corrected[:-1]
+            rscore_param = np.memmap(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_rscore_param.npy'), mode="w+", shape=(2, len(chanlist), nfrex), dtype=np.float32)
 
-    #### clean by altercating inspi and expi
-    inspi_cleaned = np.array([], dtype='int')
-    
-    for inspi_i, inspi in enumerate(inspi_corrected):
+            # for chan_i, chan in enumerate(chanlist):
+            def extract_chan_rscore_params(chan_i): 
 
-        if inspi_i == 0 or inspi == inspi_corrected[-1]:
-            inspi_cleaned = np.append(inspi_cleaned, inspi)
-            continue
+                print_advancement(chan_i, chanlist.shape[0], steps=[25, 50, 75])
 
-        mask_expi = expi_corrected > inspi
-        next_expi = expi_corrected[mask_expi][0]
+                for fi in range(nfrex):
+                    
+                    _med = np.median(tf_allconv[chan_i, fi,:])
+                    _mad = scipy.stats.median_abs_deviation(tf_allconv[chan_i, fi,:].reshape(-1), axis=0)
 
-        mask_inspi = inspi_corrected < next_expi
-        correct_inspi = inspi_corrected[mask_inspi][-1]
+                    if debug:
 
-        if inspi != correct_inspi:
-            continue
+                        _cycles = tf_allconv[chan_i, fi,:]
 
-        else:
-            inspi_cleaned = np.append(inspi_cleaned, inspi)
+                        for cycle_i in range(_cycles.shape[0]):
+                            plt.plot(_cycles[cycle_i])
+                        plt.show()
 
-    expi_cleaned = np.array([], dtype='int')
+                        min, max = np.percentile(_cycles, 1), np.percentile(_cycles, 99)
+                        plt.pcolormesh(_cycles, vmin=min, vmax=max)
+                        plt.colorbar()
+                        plt.show()
 
-    for expi_i, expi in enumerate(expi_corrected):
+                    rscore_param[0,chan_i,fi] = _mad
+                    rscore_param[1,chan_i,fi] = _med
 
-        mask_inspi = expi < inspi_corrected
-        next_inspi = inspi_corrected[mask_inspi][0]
+            joblib.Parallel(n_jobs = n_core, prefer = 'processes')(joblib.delayed(extract_chan_rscore_params)(chan_i) for chan_i, _ in enumerate(chanlist))
 
-        mask_expi = expi_corrected < next_inspi
-        correct_expi = expi_corrected[mask_expi][-1]
+            print(f'NORM', flush=True)
 
-        if expi != correct_expi:
-            continue
+            tf_allconv_norm = np.memmap(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_tf_conv_norm.npy'), mode="w+", shape=(len(chanlist), nfrex, xr_data.shape[-1]), dtype=np.float32)
 
-        else:
-            expi_cleaned = np.append(expi_cleaned, expi)
+            def norm_chan_conv(chan_i):
 
-    if inspi_cleaned.size != expi_cleaned.size+1:
-        raise ValueError('!!! bad detection !!!')
-    
-    if debug:
+                print_advancement(chan_i, len(chanlist), steps=[25, 50, 75])
 
-        plt.plot(respi)
-        plt.scatter(inspi_cleaned, respi[inspi_cleaned], color='g', label='inspi')
-        plt.scatter(expi_cleaned, respi[expi_cleaned], color='r', label='expi')
-        plt.legend()
-        plt.show()
-    
-    cycles_cleaned = np.concatenate((inspi_cleaned[:-1].reshape(-1,1), expi_cleaned.reshape(-1,1), inspi_cleaned[1:].reshape(-1,1)), axis=1)
+                mat = tf_allconv[chan_i]
 
-    if debug:
+                mad = rscore_param[0, chan_i, :]
+                med = rscore_param[1, chan_i, :]
 
-        plt.plot(respi)
-        plt.scatter(cycles_cleaned[:,0], respi[cycles_cleaned[:,0]], color='g', label='inspi')
-        plt.scatter(cycles_cleaned[:,1], respi[cycles_cleaned[:,1]], color='r', label='expi')
-        plt.scatter(cycles_cleaned[:,2], respi[cycles_cleaned[:,2]], color='b', label='next_inspi')
-        plt.legend()
-        plt.show()
+                mat_norm = (mat - med[:, None]) * 0.6745 / mad[:, None]
 
-    #### export fig
-    time_vec = np.arange(respi.shape[0])/srate
+                if debug:
 
-    inspi_removed = np.array([inspi for inspi in cycles_init[:,0] if inspi not in cycles_cleaned[:,0]])
-    expi_removed = np.array([expi for expi in cycles_init[:,1] if expi not in cycles_cleaned[:,1]])
-    
-    fig_respi_exclusion, ax = plt.subplots(figsize=(18, 10))
-    ax.plot(time_vec, respi)
+                    time_plot = 120*srate
 
-    ax.scatter(cycles_init[:,0]/srate, respi[cycles_init[:,0]], color='g', label='inspi')
-    if inspi_removed.size != 0:
-        ax.scatter(inspi_removed/srate, respi[inspi_removed], color='k', marker='x', s=100)
-    ax.scatter(cycles_cleaned[:,0]/srate, respi[cycles_cleaned[:,0]], color='g')
-    ax.scatter(cycles_cleaned[:,-1]/srate, respi[cycles_cleaned[:,-1]], color='g')
+                    plt.pcolormesh(mat[:,:time_plot])
+                    plt.colorbar()
+                    plt.show()
 
-    ax.scatter(cycles_init[:,1]/srate, respi[cycles_init[:,1]], color='r', label='expi')
-    if expi_removed.size != 0:
-        ax.scatter(expi_removed/srate, respi[expi_removed], color='k', marker='x', s=100)
-    ax.scatter(cycles_cleaned[:,1]/srate, respi[cycles_cleaned[:,1]], color='r')
+                    plt.plot(np.median(mat[:10], axis=0))
+                    plt.show()
 
-    plt.legend()
-    # plt.show()
+                    vmin, vmax = np.percentile(mat_norm[:,:time_plot].reshape(-1), 1), np.percentile(mat_norm[:,:time_plot].reshape(-1), 99)
+                    plt.pcolormesh(mat_norm[:,:time_plot], vmin=vmin, vmax=vmax)
+                    plt.colorbar()
+                    plt.show()
 
-    fig_final, ax = plt.subplots(figsize=(18, 10))
-    ax.plot(time_vec, respi)
+                    plt.hist(mat_norm.ravel(), bins=200)
+                    plt.show()
 
-    ax.scatter(cycles_cleaned[:,0]/srate, respi[cycles_cleaned[:,0]], color='g', label='inspi')
-    ax.scatter(cycles_cleaned[:,-1]/srate, respi[cycles_cleaned[:,-1]], color='g')
-    ax.scatter(cycles_cleaned[:,1]/srate, respi[cycles_cleaned[:,1]], color='r', label='expi')
+                tf_allconv_norm[chan_i] = mat_norm.astype(np.float32, copy=False)
 
-    plt.legend()
-    # plt.show()
+            joblib.Parallel(n_jobs=n_core, prefer="threads")(joblib.delayed(norm_chan_conv)(chan_i) for chan_i in range(len(chanlist)))
 
-    return cycles_cleaned, fig_respi_exclusion, fig_final
+        if norm_param == None:
 
+            print(f'NO NORM', flush=True)
 
-    
-
-
-
-
-############################
-######## LOAD DATA ########
-############################
-
-
-def load_respfeatures(sujet):
-
-    #### load data
-    os.chdir(path_prep)
-
-    respfeatures_allcond = {}
-    respi_allcond = {}
-
-    #cond = 'CHARGE'
-    for cond in cond_list:
-
-        respi = load_data_sujet(sujet,cond)[np.where(chan_list == 'pression')[0][0],:]
-        respi = scipy.signal.detrend(respi, type='linear')
-        respi_allcond[cond] = respi
-
-        params = physio.get_respiration_parameters('human_airflow')
-        params['cycle_clean']['low_limit_log_ratio'] = 6
-        # params['cycle_detection']['inspiration_adjust_on_derivative'] = True
-
-        diff1 = np.diff(respi)*-1
-        peaks, _ = scipy.signal.find_peaks(diff1, prominence=(diff1).std()*3)
-
-        baseline_val = []
-
-        for peak_i, peak in enumerate(peaks):
-
-            if peak_i == peaks.size-1:
-                continue
-
-            backward_signal = diff1[peaks[peak_i]:peaks[peak_i+1]][::-1]
-            backward_val = np.where(np.diff(backward_signal) > 0)[0][0]
-            baseline_val.append(respi[peak-backward_val])
-
-        baseline = np.median(baseline_val)
+            tf_allconv_norm[:] = tf_allconv
 
         if debug:
 
-            plt.plot(respi)
-            plt.hlines(np.median(baseline_val), xmin=0, xmax=respi.size, color='r')
+            for chan_i in range(10):
+                _tf = tf_allconv_norm[chan_i]
+                min, max = np.percentile(_tf, 1), np.percentile(_tf, 99)
+                plt.pcolormesh(_tf, vmin=min, vmax=max)
+                plt.colorbar()
+                plt.show()
+
+            plt.hist(_tf.reshape(-1))
             plt.show()
 
-        params['baseline']['baseline_mode'] = 'manual'
-        params['baseline']['baseline'] = baseline
+            _tf.reshape(-1).max()
+          
+        #### stretch
+        print('STRETCH')
 
-        respi_clean, resp_features_i = physio.compute_respiration(raw_resp=respi, srate=srate, parameters=params)
+        cond_name, trial_num = trial.split('_')[0], trial[-1]
+        respfeature_trial = get_respfeatures_relabel(sujet).query(f"cond == '{cond_name}' and trial == {trial_num}")
 
-        respi -= baseline
+        if debug:
 
-        time_vec = np.arange(respi.size)/srate
+            plt.scatter(respfeature_trial['inspi_index'].values, respfeature_trial['inspi_index'].values, label='inspi')
+            plt.scatter(respfeature_trial['expi_index'].values, respfeature_trial['expi_index'].values, label='expi')
+            plt.scatter(respfeature_trial['next_inspi_index'].values, respfeature_trial['next_inspi_index'].values, label='next_inspi')
+            plt.legend()
+            plt.show()
 
-        fig_final, ax = plt.subplots(figsize=(18, 10))
-        ax.plot(time_vec, respi)
+            cycle_times = respfeature_trial[['inspi_time', 'expi_time', 'next_inspi_time']].values
+            (cycle_times[1:, 0] == cycle_times[:-1, -1]).all()
 
-        ax.scatter(resp_features_i['inspi_index'].values/srate, respi[resp_features_i['inspi_index'].values], color='g', label='inspi')
-        ax.scatter(resp_features_i['expi_index'].values/srate, respi[resp_features_i['expi_index'].values], color='r', label='expi')
-        ax.scatter(resp_features_i['next_inspi_index'].values/srate, respi[resp_features_i['next_inspi_index'].values], color='g', label='inspi')
+        tf_allchan_stretch = []
 
-        plt.legend()
-        # plt.show()
+        for chan_i, _ in enumerate(chanlist):
 
-        # cycles = physio.detect_respiration_cycles(respi, srate, baseline_mode='median',
-        #                                           baseline=None, epsilon_factor1=10, epsilon_factor2=5, inspiration_adjust_on_derivative=False)
+            print_advancement(chan_i, len(chanlist), [25,50,75])
+
+            tf_allchan_stretch.append(stretch_data_tf(respfeature_trial, stretch_point_TF, tf_allconv_norm[chan_i], srate)[0].astype(np.float32))
+
+        tf_allchan_stretch = np.array(tf_allchan_stretch)
+
+        resp_stretch = stretch_data(respfeature_trial, stretch_point_TF, resp, srate)[0]
+        CO2_stretch = stretch_data(respfeature_trial, stretch_point_TF, CO2, srate)[0]
+
+        if debug:
+            for cycle_i in range(resp_stretch.shape[0]):
+                plt.plot(resp_stretch[cycle_i])
+            plt.show()
+
+            plt.pcolormesh(np.median(tf_allchan_stretch[0], axis=[0]))
+            plt.show()
+
+        #### extract pre/post/condition
+        if debug:
+            plt.hist(respfeature_trial['cycle_duration'], bins=50)
+            plt.show()
+
+            plt.hist(respfeature_trial['inspi_duration'], bins=50)
+            plt.show()
         
-        # cycles = debugged_detect_respiration_cycles(respi, srate, baseline_mode='median',
-        #                                             baseline=None, epsilon_factor1=10, epsilon_factor2=5, inspiration_adjust_on_derivative=False)
-        
-        # if debug:
+        #### save stretch tf
+        print(f'SAVE TF STRETCH {sujet} {trial}', flush=True)
+        dict_xr_tf_coords = {'chan' : chanlist, 'cycle' : np.arange(tf_allchan_stretch.shape[1]), 'freq' : frex, 'phase' : np.arange(stretch_point_TF)} 
+        xr_tf_stretch_export = xr.DataArray(tf_allchan_stretch, dims=dict_xr_tf_coords.keys(), coords=dict_xr_tf_coords)
+        xr_tf_stretch_export.to_netcdf(os.path.join(path_export_TF, f"{sujet}_{trial}_tf_stretch.nc"))
 
-        #     fig, ax = plt.subplots()
-        #     ax.plot(respi)
-        #     ax.scatter(cycles[:,0], respi[cycles[:,0]], color='g')
-        #     plt.show()
+        #### remove
+        os.remove(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_tf_conv.npy'))
+        os.remove(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_rscore_param.npy'))
+        os.remove(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_tf_conv_norm.npy'))
 
-        # cycles, fig_respi_exclusion, fig_final = exclude_bad_cycles(respi, cycles, srate, exclusion_coeff=1)
-            
-        # if debug:
-
-        #     fig, ax = plt.subplots()
-        #     ax.plot(respi)
-        #     ax.scatter(cycles[:,0], respi[cycles[:,0]], color='r')
-        #     plt.show()
-
-        # #### get resp_features
-        # resp_features_i = physio.compute_respiration_cycle_features(respi, srate, cycles, baseline=None)
-
-        # select_vec = np.ones((resp_features_i.index.shape[0]), dtype='int')
-        # resp_features_i.insert(resp_features_i.columns.shape[0], 'select', select_vec)
-        
-        respfeatures_allcond[cond] = [resp_features_i, fig_final]
-
-    return respi_allcond, respfeatures_allcond
+        del tf_allconv, rscore_param, tf_allconv_norm
 
 
 
 
-####################################
-######## PLOT MEAN RESPI ########
-####################################
 
-def plot_mean_respi(sujet):
 
-    time_vec = np.arange(stretch_point_ERP)
-    colors_respi = {'VS' : 'b', 'CHARGE' : 'r'}
-    colors_respi_sem = {'VS' : 'c', 'CHARGE' : 'm'}
 
-    respi_allcond, respfeatures = load_respfeatures(sujet)
-    sem_allcond = {}
-    lim = {'min' : np.array([]), 'max' : np.array([])} 
 
+
+################################
+######## EXTRACT POWER ########
+################################
+
+
+def extract_power(sujet):
+
+    print("EXTRACT POWER", flush=True)
+
+    #### verify if already computed
+    path_export_Pxx = os.path.join(path_precompute, 'Pxx')
+
+    if os.path.exists(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx.nc')):
+        print(f'{sujet} ALREADY COMPUTED', flush=True)
+        return
+
+    #### params
+    chanlist, _, _, localist = get_chanlist_localist(sujet)
+
+    idx = np.arange(stretch_point_TF)
+    inspi_sel = idx <= stretch_point_TF / 2
+    expi_sel  = idx >  stretch_point_TF / 2
+
+    bands = list(freq_band_dict.keys())
+    phases = ["inspi", "expi"]
+
+    band_frex_sel = {band: (frex >= freq[0]) & (frex <= freq[-1])
+                    for band, freq in freq_band_dict.items()}
+    
     #### load
-    #cond = 'VS'
-    for cond in cond_list:
+    path_load_precompute_tf = os.path.join(path_precompute, 'TF', sujet)
+    trial_list = get_alltrials_sujet(sujet)
 
-        respi_stretch = stretch_data(respfeatures[cond][0], stretch_point_ERP, respi_allcond[cond], srate)[0]
-        respi_allcond[cond] = respi_stretch.mean(axis=0)
-        sem_allcond[cond] = respi_stretch.std(axis=0)/np.sqrt(respi_stretch.shape[0])
-        lim['min'], lim['max'] = np.append(lim['min'], respi_allcond[cond].min()-sem_allcond[cond]), np.append(lim['max'], respi_allcond[cond].max()+sem_allcond[cond])
+    #### extract Pxx
+    xr_Pxx = []
 
-    #### plot
-    fig, ax = plt.subplots()
+    for cond in conditions:
 
-    #cond = 'VS'
-    for cond in cond_list:
+        trial_list_cond = [trial for trial in trial_list if trial.find(cond) != -1]
 
-        ax.plot(time_vec, respi_allcond[cond], color=colors_respi[cond], label=cond)
-        ax.fill_between(time_vec, respi_allcond[cond]+sem_allcond[cond], respi_allcond[cond]-sem_allcond[cond], alpha=0.25, color=colors_respi_sem[cond])
+        Pxx_trial_list = []
 
-    ax.vlines(stretch_point_ERP/2, ymin=lim['min'].min(), ymax=lim['max'].max(), color='r')
-    plt.ylim(lim['min'].min(), lim['max'].max())
-    plt.title(sujet)
-    plt.legend()
-    # plt.show()
+        for trial in trial_list_cond:
 
-    os.chdir(os.path.join(path_results, 'RESPI', 'plot'))
-    plt.savefig(f"{sujet}_respi_mean.png")
+            print(f"{trial}")
 
-    plt.close('all')
+            #### load
+            xr_tf = xr.open_dataarray(os.path.join(path_load_precompute_tf, f"{sujet}_{trial}_tf_stretch.nc"))
+
+            #### extract
+            Pxx_trial = np.zeros((1, xr_tf['chan'].shape[0], len(bands), len(phases), xr_tf['cycle'].shape[0]), dtype=np.float32)
+
+            for chan_i, chan_name in enumerate(chanlist):
+
+                ncycle = xr_tf['cycle'].shape[0]
+
+                for cycle_i in range(ncycle):
+
+                    for band_i, (band, frex_sel) in enumerate(band_frex_sel.items()):
+
+                        _tf = xr_tf.sel(chan=chan_name, cycle=cycle_i, freq=frex[frex_sel]).values
+
+                        pxx_inspi = np.median(_tf[:, inspi_sel])
+                        pxx_expi  = np.median(_tf[:, expi_sel])
+
+                        Pxx_trial[0, chan_i, band_i, 0, cycle_i] = pxx_inspi
+                        Pxx_trial[0, chan_i, band_i, 1, cycle_i] = pxx_expi
+
+            Pxx_trial_list.append(Pxx_trial)
+
+        xr_Pxx.append(np.concat(Pxx_trial_list, axis=-1))
+
+    #### construct xr
+    max_cycle = np.array([_Pxx.shape[-1] for _Pxx in xr_Pxx]).max()
+    xr_Pxx_data = np.full((1, len(conditions), xr_tf['chan'].shape[0], len(bands), len(phases), max_cycle), np.nan, dtype=np.float32)
+
+    for cond_i, cond in enumerate(conditions):
+        
+        cond_max_cycle = xr_Pxx[cond_i].shape[-1]
+        xr_Pxx_data[0,cond_i,:,:,:,:cond_max_cycle] = xr_Pxx[cond_i]
+
+    da_Pxx = xr.DataArray(
+        xr_Pxx_data,
+        dims=("sujet", "cond", "chan", "band", "phase", "cycle"),
+        coords={
+            "sujet" : [sujet],
+            "cond": conditions,
+            "chan": chanlist,
+            "band": bands,
+            "phase": phases,
+            "cycle": np.arange(max_cycle),
+            "ROI": ("chan", localist['FS_volumetric_corrected'].values),   
+        },
+        name="Pxx"
+    )
+
+
+    #### SAVE
+    print('SAVE EXTRACT PXX', flush=True)
+    da_Pxx.to_netcdf(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx.nc')) 
+
+    print('done', flush=True)
 
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-############################
+################################
 ######## EXECUTE ########
-############################
-
+################################
 
 
 if __name__ == '__main__':
 
+    #### PRECOMPUTE
+    norm_param = 'rscore'
     
-    # sujet_list = ['01NM_MW', '02NM_OL', '03NM_MC', '04NM_LS', '05NM_JS', '06NM_HC', '07NM_YB', '08NM_CM', '09NM_CV', '10NM_VA', '11NM_LC', '12NM_PS', '13NM_JP', '14NM_LD',
-    #           '15PH_JS',  '16PH_LP',  '17PH_SB',  '18PH_TH',  '19PH_VA',  '20PH_VS',
-    #           '21IL_NM', '22IL_DG', '23IL_DM', '24IL_DJ', '25IL_DC', '26IL_AP', '27IL_SL', '28IL_LL', '29IL_VR', '30IL_LC', '31IL_MA', '32IL_LY', '33IL_BA', '34IL_CM', '35IL_EA', '36IL_LT',
-    #           '37DL_05', '38DL_06', '39DL_07', '40DL_08', '41DL_11', '42DL_12', '43DL_13', '44DL_14', '45DL_15', '46DL_16', '47DL_17', '48DL_18', '49DL_19', '50DL_20', '51DL_21', '52DL_22',
-    #           '53DL_23', '54DL_24', '55DL_25', '56DL_26', '57DL_27', '58DL_28', '59DL_29', '60DL_30', '61DL_31', '62DL_32', '63DL_34',
-    #           ]
-
-    sujet = '49DL_19'
-
+    #sujet = sujet_list[0]
     for sujet in sujet_list:
 
-        if os.path.exists(os.path.join(path_results, 'RESPI', 'count', f'{sujet}_count_cycles.xlsx')):
-            print(f"{sujet} ALREADY COMPUTED")
-            continue
-        else:
-            print(sujet)
-        
-        respi_allcond, respfeatures_allcond = load_respfeatures(sujet)
-
-        ########################################
-        ######## VERIF RESPIFEATURES ########
-        ########################################
-        
-        if debug == True :
-
-            cond = 'VS'
-            cond = 'CHARGE' 
-
-            respfeatures_allcond[cond][1].show()
-            # respfeatures_allcond[cond][2].show()
-
-        ########################################
-        ######## EDIT CYCLES SELECTED ########
-        ########################################
-
-        # respfeatures_allcond = edit_df_for_sretch_cycles_deleted(respi_allcond, respfeatures_allcond)
-
-        #### generate df
-        df_count_cycle = pd.DataFrame(columns={'sujet' : [], 'cond' : [], 'count' : []})
-
-        for cond in cond_list:
-            
-            data_i = {'sujet' : [sujet], 'cond' : [cond], 'count' : [respfeatures_allcond[cond][0].shape[0]]}
-            df_i = pd.DataFrame(data_i, columns=data_i.keys())
-            df_count_cycle = pd.concat([df_count_cycle, df_i])
-
-        #### export
-        os.chdir(os.path.join(path_results, 'RESPI', 'count'))
-        df_count_cycle.to_excel(f'{sujet}_count_cycles.xlsx')
-
-        if debug :
-
-            for cond in cond_list:
-
-                _respi = respi_allcond[cond]
-                plt.plot(_respi)
-                plt.vlines(respfeatures_allcond[cond][0]['inspi_index'].values, ymin=_respi.min(), ymax=_respi.max(), color='r')
-                plt.title(f"{cond}")
-                plt.show()
-
-        ################################
-        ######## SAVE FIG ########
-        ################################
-
-        for cond in cond_list:
-
-            os.chdir(os.path.join(path_results, 'RESPI', 'respfeatures'))
-            respfeatures_allcond[cond][0].to_excel(f"{sujet}_{cond}_respfeatures.xlsx")
-            
-            os.chdir(os.path.join(path_results, 'RESPI', 'detection'))
-            respfeatures_allcond[cond][1].savefig(f"{sujet}_{cond}_fig0.jpeg")
-            # respfeatures_allcond[cond][2].savefig(f"{sujet}_{cond}_fig1.jpeg")
-
-        plt.close('all')
-
-        ################################
-        ######## PLOT MEAN RESPI ########
-        ################################
-
-        plot_mean_respi(sujet)
+        precompute_tf(sujet, norm_param)
+        extract_power(sujet)
 
 
 
 
 
-    ####################################
-    ######## AGGREGATES COUNT ########
-    ####################################
-        
-    df_count_cycle = pd.DataFrame(columns={'sujet' : [], 'cond' : [], 'count' : []})
-
-    os.chdir(os.path.join(path_results, 'RESPI', 'count'))
-
-    for sujet in sujet_list:
-
-        _df_count_cycle = pd.read_excel(f'{sujet}_count_cycles.xlsx')
-        df_count_cycle = pd.concat([df_count_cycle, _df_count_cycle], axis=0)
-
-    df_count_cycle = df_count_cycle.drop(columns='Unnamed: 0')
-
-    ncount_selsujet = []
-
-    for ncount in np.arange(40, 300, 1):
-        df_sel_ncycle = df_count_cycle.query(f"count >= {ncount}")
-        nsujet = [sujet for sujet in sujet_list if (df_sel_ncycle['sujet'].values == sujet).sum() == 2] 
-        ncount_selsujet.append(len(nsujet))
-
-    plt.plot(np.arange(40, 300, 1), ncount_selsujet)
-    plt.show()
-
-    df_sel_ncycle = df_count_cycle.query(f"count >= 100")
-    sujet_list_fc = [sujet for sujet in sujet_list if (df_sel_ncycle['sujet'].values == sujet).sum() == 2]
-    nsujet = len(sujet_list_fc)
-
-    plt.hist(df_count_cycle.query(f"cond == 'VS'")['count'].values, bins=20, label='VS', alpha=0.7)
-    plt.hist(df_count_cycle.query(f"cond == 'CHARGE'")['count'].values, bins=20, label='CHARGE', alpha=0.7)
-    plt.xlabel('count')
-    plt.ylabel('n_sujet')
-    plt.title('cycle_count')
-    plt.legend()
-    plt.show()
-
-    plt.savefig('allsujet_cycle_count.png')
+                        
