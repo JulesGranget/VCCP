@@ -19,9 +19,9 @@ library(patchwork)
 
 
 
-########################
-######## Pxx ########
-########################
+################################
+######## Pxx COND VCCP ########
+################################
 
 
 
@@ -91,8 +91,8 @@ fit_model_with_fallback <- function(df, tol_sing = 1e-4, maxfun = 2e5) {
 
 
 root = "/home/jules/Documents/VCCP_JULES/Analyses/precompute/EXPORT_DF/patient_wise/Pxx"
-outputdir_fig = "/home/jules/Documents/VCCP_JULES/Analyses/precompute/EXPORT_DF/patient_wise/Pxx/LMM/diagnosis"
-outputdir_df_lmm = "/home/jules/Documents/VCCP_JULES/Analyses/precompute/EXPORT_DF/patient_wise/Pxx/LMM/df_res"
+outputdir_fig = "/home/jules/Documents/VCCP_JULES/Analyses/results/Pxx/LMM/VCCP/patientwise/diagnosis"
+outputdir_df_lmm = "/home/jules/Documents/VCCP_JULES/Analyses/precompute/EXPORT_DF/patient_wise/Pxx/LMM_res"
 
 sujet = "LH018"
 protocol_type = "VCCP"
@@ -105,7 +105,7 @@ band = band_list[1]
 
 for (band in band_list) {
   
-  filename <- paste0("/", sujet, "df_Pxx_", band, "_protocol_R.xlsx")
+  filename <- paste0("/", sujet, "_df_Pxx_", band, "_VCCP_R.xlsx")
   df_raw <- read_excel(paste(root, filename, sep = "/"))
   
   df_raw$chan <- paste0(df_raw$sujet, "_", df_raw$chan)
@@ -307,12 +307,8 @@ for (band in band_list) {
 
 
 
-
-
-
-
 ################################
-#### REG_PRE_POST ####
+#### REG PXX VCCP ####
 ################################
 
 

@@ -1,5 +1,11 @@
 
+
+
+import scipy
 import numpy as np
+
+
+
 
 
 ################################
@@ -14,6 +20,7 @@ sujet_list = ['LH018']
 
 
 conditions = ['RB', 'HV', 'AoRoCo', 'AoR-Co', 'A+RoCc', 'A+R-Cc', 'A+RoC-', 'A+R-C-']
+conditions_VCCP = ['AoRoCo', 'AoR-Co', 'A+RoCc', 'A+R-Cc', 'A+RoC-', 'A+R-C-']
 
 aux_chanlist = ['resp', 'co2', 'gsm']
 
@@ -26,6 +33,10 @@ freq_band_dict = {'theta' : [4,8], 'alpha' : [8,12], 'beta' : [12,50], 'gamma' :
 ROI_short_list = ['entorhinal', 'Amygdala', 'medialorbitofrontal', 'Hippocampus', 
        'lateralorbitofrontal', 'Thalamus', 'posteriorcingulate',
        'isthmuscingulate']
+
+
+
+
 
 ########################################
 ######## PATH DEFINITION ########
@@ -96,6 +107,31 @@ tf_plot_percentile_scale = 1 #for one side
 
 
 
+
+################################
+######## PRECOMPUTE Cxy ########
+################################
+
+
+zero_pad_coeff = 15
+
+def get_params_spectral_analysis(srate):
+
+    nwind = int( 20*srate ) # window length in seconds*srate
+    nfft = nwind*zero_pad_coeff # if no zero padding nfft = nwind
+    noverlap = np.round(nwind/2) # number of points of overlap here 50%
+    hannw = scipy.signal.windows.hann(nwind) # hann window
+
+    return nwind, nfft, noverlap, hannw
+
+#### plot Pxx Cxy  
+if zero_pad_coeff - 5 <= 0:
+    remove_zero_pad = 0
+remove_zero_pad = zero_pad_coeff - 5
+
+#### coh
+freq_surrogates = [0, 2]
+Cxy_extraction_range = 0.025
 
 
 

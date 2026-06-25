@@ -150,10 +150,10 @@ def extract_respfeatures_and_mean_figures(sujet):
 
             resp_features = physio.compute_respiration_cycle_features(resp_clean_smooth, srate, cycles, baseline=None)
 
-            resp_features.insert(0, 'cond', [cond]*resp_features.shape[0])
-            resp_features.insert(1, 'trial', [trial_i+1]*resp_features.shape[0])
-            select_vec = np.ones((resp_features.index.shape[0]), dtype='int')
-            resp_features.insert(resp_features.columns.shape[0], 'select', select_vec)
+            resp_features.insert(0, 'sujet', [sujet]*resp_features.shape[0])
+            resp_features.insert(1, 'cond', [cond]*resp_features.shape[0])
+            resp_features.insert(2, 'trial', [trial_i+1]*resp_features.shape[0])
+            resp_features.insert(3, 'cycle', np.arange(resp_features.shape[0]))
 
             time_vec = np.arange(resp.shape[0])/srate
 
@@ -225,6 +225,10 @@ def extract_respfeatures_and_mean_figures(sujet):
             CO2_etCO2 = [CO2_cycle[int(stretch_point_TF/2):].max() for CO2_cycle in CO2_stretch]
             resp_features['etCO2'] = CO2_etCO2
 
+            #### add select col
+            select_vec = np.ones((resp_features.index.shape[0]), dtype='int')
+            resp_features.insert(resp_features.columns.shape[0], 'select', select_vec)
+
             #### fig final
             fig_final_resp, ax = plt.subplots(figsize=(18, 10))
             ax.plot(time_vec, resp)
@@ -248,9 +252,9 @@ def extract_respfeatures_and_mean_figures(sujet):
 
             #### export trial
             path_export_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-            resp_features.to_excel(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_respfeatures.xlsx"))
-            fig_final_resp.savefig(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_resp_detect.png"))
-            fig_final_CO2.savefig(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_CO2_detect.png"))
+            resp_features.to_excel(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_respfeatures_RAW.xlsx"))
+            fig_final_resp.savefig(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_resp_detect_RAW.png"))
+            fig_final_CO2.savefig(os.path.join(path_export_respfeatures, f"{sujet}_{trial_name}_CO2_detect_RAW.png"))
 
             #### append all trial
             alltrial_stretch_resp.append(resp_stretch)
@@ -293,12 +297,12 @@ def extract_respfeatures_and_mean_figures(sujet):
                 
                 ax.vlines(int(stretch_point_TF/2), ymin=min, ymax=max, color='r')         
 
-        plt.suptitle(f'{sujet}')
+        plt.suptitle(f'{sujet} {cond}')
         plt.tight_layout()
         plt.rcParams.update({'font.size': 12})
         # plt.show()
 
-        fig_mean.savefig(os.path.join(path_export_mean_fig, f"{sujet}_stretch_mean.png"))
+        fig_mean.savefig(os.path.join(path_export_mean_fig, f"{sujet}_{cond}_stretch_mean_RAW.png"))
 
     #### export respfeature allcond
     path_trigger = os.path.join(path_prep, sujet, f"{sujet}_trigger.xlsx")
@@ -311,11 +315,29 @@ def extract_respfeatures_and_mean_figures(sujet):
         count_cond[trial] += 1
         trial_list.append(f"{trial}_{count_cond[trial]}")
 
-    load_list = [f"{sujet}_{file}_respfeatures.xlsx" for file in trial_list]
+    load_list = [f"{sujet}_{file}_respfeatures_RAW.xlsx" for file in trial_list]
     respfeatures_allcond = [pd.read_excel(os.path.join(path_export_respfeatures, file)) for file in load_list]
     respfeatures_allcond = pd.concat(respfeatures_allcond).drop(columns=['Unnamed: 0'])
+    respfeatures_allcond = respfeatures_allcond.sort_values(['cond', 'trial'])
     respfeatures_allcond = respfeatures_allcond.reset_index(drop=True)
-    respfeatures_allcond.to_excel(os.path.join(path_export_respfeatures, f"respfeature_allcond.xlsx"))
+
+    cycle_i_vec = []
+    cycle_count = 0
+
+    for row_i, row_val in respfeatures_allcond.iterrows():
+
+        if row_i != 0:
+            cond_row = row_val['cond']
+            if cond_row == cond_prev:
+                cycle_count += 1
+            else:
+                cycle_count = 0
+        cycle_i_vec.append(cycle_count)
+        cond_prev = row_val['cond']
+
+    respfeatures_allcond['cycle'] = cycle_i_vec
+
+    respfeatures_allcond.to_excel(os.path.join(path_export_respfeatures, f"respfeature_allcond_RAW.xlsx"))
 
 
 
@@ -326,7 +348,7 @@ def extract_respfeatures_and_mean_figures(sujet):
 def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
     #### load respfeatures
-    respfeatures_allcond = get_respfeatures(sujet)
+    respfeatures_allcond = get_respfeatures_raw(sujet)
 
     #### params stats
     rf_metrics_fullcycle = ['cycle_duration', 'cycle_freq', 'total_amplitude', 'total_volume', 'etCO2']
@@ -645,6 +667,50 @@ def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
 
 
+################################
+######## SCALE ########
+################################
+
+
+def export_rf_cond_scaling(sujet):
+
+    #### extract respfeatures
+    respfeature = get_respfeatures_relabel_raw(sujet)
+
+    #### extract ref
+    _rf_baseline_VCCP = respfeature.query(f"cond_relabel == 'AoRoCo'")
+    _rf_baseline_RB = respfeature.query(f"cond == 'RB'")
+    A_VCCP_SD, R_VCCP_SD, C_VCCP_SD = _rf_baseline_VCCP['total_amplitude'].std(), _rf_baseline_VCCP['cycle_freq'].std(), _rf_baseline_VCCP['etCO2'].std() 
+    A_RB_SD, R_RB_SD, C_RB_SD = _rf_baseline_RB['total_amplitude'].std(), _rf_baseline_RB['cycle_freq'].std(), _rf_baseline_RB['etCO2'].std() 
+    
+    #### get rf_scaled
+    rf_SD_scaled_VCCP = respfeature.copy()
+    rf_SD_scaled_RB = respfeature.copy()
+
+    df_list = [rf_SD_scaled_VCCP, rf_SD_scaled_RB]
+    df_type = ['VCCP', 'RB']
+    df_scaled = []
+
+    for _df_i, _df in enumerate(df_list):
+        
+        if df_type[_df_i] == 'VCCP':
+            _A_baseline, _R_baseline, _C_baseline = A_VCCP_SD, R_VCCP_SD, C_VCCP_SD
+        else:
+            _A_baseline, _R_baseline, _C_baseline = A_RB_SD, R_RB_SD, C_RB_SD
+    
+        _df['A_scaled'] = _df['total_amplitude'] / _A_baseline
+        _df['R_scaled'] = _df['cycle_freq'] / _R_baseline
+        _df['C_scaled'] = _df['etCO2'] / _C_baseline
+
+        df_scaled.append(_df)
+
+    rf_SD_scaled_VCCP_export, rf_SD_scaled_RB_export = df_scaled[0], df_scaled[1]
+
+    #### export
+    path_export = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    rf_SD_scaled_VCCP_export.to_excel(os.path.join(path_export, f"{sujet}_df_scaled_VCCP.xlsx"))
+    rf_SD_scaled_RB_export.to_excel(os.path.join(path_export, f"{sujet}_df_scaled_RB.xlsx"))
+
 
 
 
@@ -655,13 +721,12 @@ def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
 if __name__ == '__main__':
 
-    sujet = 'NS217'
-    sujet = 'LH018'
-
+    #sujet = 'LH018'
     for sujet in sujet_list:
 
         extract_respfeatures_and_mean_figures(sujet)
         export_cond_relabeling_fig(sujet)
+        export_rf_cond_scaling(sujet)
 
 
 

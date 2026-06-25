@@ -144,6 +144,16 @@ def load_data_sujet(sujet, cond):
 
 
 
+def load_trial_data_sujet(sujet, trial):
+
+    _path_load_file = os.path.join(path_prep, sujet, 'trial_exports')
+    _data = xr.open_dataarray(os.path.join(_path_load_file, f'{sujet}_{trial}.nc'))
+
+    return _data
+
+
+
+
 def get_chanlist_localist(sujet):
 
     path_load_trial = os.path.join(path_prep, sujet, 'trial_exports')
@@ -203,19 +213,27 @@ def get_df_loca(sujet):
 
 
 ########################################
-######## LOAD RESPI FEATURES ########
+######## LOAD RESPFEATURES ########
 ########################################
 
-def get_respfeatures(sujet):
+def get_respfeatures_raw(sujet):
     
     path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond.xlsx")).drop(columns=['Unnamed: 0'])
+    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_RAW.xlsx")).drop(columns=['Unnamed: 0'])
 
     return respfeature_allcond
 
 
+def get_respfeatures(sujet):
+    
+    path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_RAW.xlsx")).drop(columns=['Unnamed: 0'])
+    respfeature_allcond = respfeature_allcond.query(f"select == 1")
 
-def get_respfeatures_relabel(sujet):
+    return respfeature_allcond
+
+
+def get_respfeatures_relabel_raw(sujet):
     
     path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
     respfeature_allcond_relabel = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_relabel.xlsx")).drop(columns=['Unnamed: 0'])
@@ -224,49 +242,30 @@ def get_respfeatures_relabel(sujet):
 
 
 
-def get_all_respi_ratio(sujet):
+def get_respfeatures_relabel_cycle_cleaned(sujet):
     
-    respfeatures_allcond = load_respfeatures(sujet)
-    
-    respi_ratio_allcond = {}
+    path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeature_allcond_relabel = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_relabel.xlsx")).drop(columns=['Unnamed: 0'])
+    respfeature_allcond_relabel = respfeature_allcond_relabel.query(f"select == 1")
+    respfeature_allcond_relabel = respfeature_allcond_relabel.sort_values(['cond', 'cycle']).reset_index(drop=True)
 
-    for cond in cond_list:
+    cycle_i_vec = []
+    cycle_count = 0
 
-        if len(respfeatures_allcond[cond]) == 1:
+    for row_i, row_val in respfeature_allcond_relabel.iterrows():
 
-            mean_cycle_duration = np.mean(respfeatures_allcond[cond][0][['insp_duration', 'exp_duration']].values, axis=0)
-            mean_inspi_ratio = mean_cycle_duration[0]/mean_cycle_duration.sum()
+        if row_i != 0:
+            cond_row = row_val['cond']
+            if cond_row == cond_prev:
+                cycle_count += 1
+            else:
+                cycle_count = 0
+        cycle_i_vec.append(cycle_count)
+        cond_prev = row_val['cond']
 
-            respi_ratio_allcond[cond] = [ mean_inspi_ratio ]
+    respfeature_allcond_relabel['cycle'] = cycle_i_vec
 
-        elif len(respfeatures_allcond[cond]) > 1:
-
-            data_to_short = []
-            data_to_short_count = 1
-
-            for session_i in range(len(respfeatures_allcond[cond])):   
-                
-                if session_i == 0 :
-
-                    mean_cycle_duration = np.mean(respfeatures_allcond[cond][session_i][['insp_duration', 'exp_duration']].values, axis=0)
-                    mean_inspi_ratio = mean_cycle_duration[0]/mean_cycle_duration.sum()
-                    data_to_short = [ mean_inspi_ratio ]
-
-                elif session_i > 0 :
-
-                    mean_cycle_duration = np.mean(respfeatures_allcond[cond][session_i][['insp_duration', 'exp_duration']].values, axis=0)
-                    mean_inspi_ratio = mean_cycle_duration[0]/mean_cycle_duration.sum()
-
-                    data_replace = [(data_to_short[0] + mean_inspi_ratio)]
-                    data_to_short_count += 1
-
-                    data_to_short = data_replace.copy()
-            
-            # to put in list
-            respi_ratio_allcond[cond] = data_to_short[0] / data_to_short_count
-
-    return respi_ratio_allcond
-
+    return respfeature_allcond_relabel
 
 
 

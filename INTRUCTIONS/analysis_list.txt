@@ -1,0 +1,21 @@
+
+
+
+
+
+
+
+Pxx : patient wise, all patient 
+    VCCP : LMM ~ cond, LMM ~ REG
+    attention : LMM ~ cond, LMM ~ REG
+    HV : LMM ~ cond, LMM ~ REG
+
+Cxy : allsujet
+    VCCP : LMM ~ cond, LMM ~ REG
+    attention : LMM ~ cond, LMM ~ REG
+    HV : LMM ~ cond, LMM ~ REG
+
+
+
+
+

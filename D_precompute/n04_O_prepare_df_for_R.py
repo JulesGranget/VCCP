@@ -24,7 +24,7 @@ import warnings
 
 
 #sujet = sujet_list[0]
-def export_Pxx_df_sujet(sujet):
+def export_Pxx_cond_df_sujet(sujet):
 
     for band in freq_band_dict:
 
@@ -33,39 +33,232 @@ def export_Pxx_df_sujet(sujet):
         #### load
         path_load_Pxx = os.path.join(path_precompute, 'Pxx')
 
-        _xr = xr.open_dataarray(os.path.join(path_load_Pxx, f"{sujet}_xr_Pxx.nc")).sel(band=band).rename({'phase' : 'phase_cycle'})
+        _xr_raw = xr.open_dataarray(os.path.join(path_load_Pxx, f"{sujet}_xr_Pxx_RAW.nc")).sel(band=band).rename({'phase' : 'phase_cycle'})
+        _xr_relabel = xr.open_dataarray(os.path.join(path_load_Pxx, f"{sujet}_xr_Pxx_RELABEL.nc")).sel(band=band).rename({'phase' : 'phase_cycle'})
 
         #### generate df
-        df_band_Pxx_sujet_raw = _xr.to_dataframe().reset_index()
+        df_band_Pxx_sujet_raw = _xr_raw.to_dataframe().reset_index()
+        df_band_Pxx_sujet_relabel = _xr_relabel.to_dataframe().reset_index()
         
         #### clean
         nan_exclude_vec = ~df_band_Pxx_sujet_raw['Pxx'].isna()
-        df_band_Pxx_sujet = df_band_Pxx_sujet_raw[nan_exclude_vec]
-        df_band_Pxx_sujet = df_band_Pxx_sujet.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
+        df_band_Pxx_sujet_raw = df_band_Pxx_sujet_raw[nan_exclude_vec]
+        df_band_Pxx_sujet_raw = df_band_Pxx_sujet_raw.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
+
+        nan_exclude_vec = ~df_band_Pxx_sujet_relabel['Pxx'].isna()
+        df_band_Pxx_sujet_relabel = df_band_Pxx_sujet_relabel[nan_exclude_vec]
+        df_band_Pxx_sujet_relabel = df_band_Pxx_sujet_relabel.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
 
         #### prepare cond
-        df_band_Pxx_sujet_attention = df_band_Pxx_sujet.query(f"cond in ['RB', 'AoRoCo']")
-        df_band_Pxx_sujet_HV = df_band_Pxx_sujet.query(f"cond in ['RB', 'HV']")
-        df_band_Pxx_sujet_protocol = df_band_Pxx_sujet.query(f"cond not in ['RB', 'HV']")
+        df_band_Pxx_sujet_attention = df_band_Pxx_sujet_raw.query(f"cond in ['RB', 'AoRoCo']")
+        df_band_Pxx_sujet_HV = df_band_Pxx_sujet_raw.query(f"cond in ['RB', 'HV']")
+        df_band_Pxx_sujet_VCCP = df_band_Pxx_sujet_relabel
 
         A_cond, R_cond, C_cond = [], [], []
-        for row_i, row_val in df_band_Pxx_sujet_protocol.iterrows():
+        for row_i, row_val in df_band_Pxx_sujet_VCCP.iterrows():
 
             A_cond.append(row_val['cond'][1])
             R_cond.append(row_val['cond'][3])
             C_cond.append(row_val['cond'][5])
 
-        df_band_Pxx_sujet_protocol['A'], df_band_Pxx_sujet_protocol['R'], df_band_Pxx_sujet_protocol['C'] = A_cond, R_cond, C_cond
-        df_band_Pxx_sujet_protocol = df_band_Pxx_sujet_protocol.drop(columns=['cond'])
+        df_band_Pxx_sujet_VCCP['A'], df_band_Pxx_sujet_VCCP['R'], df_band_Pxx_sujet_VCCP['C'] = A_cond, R_cond, C_cond
+        df_band_Pxx_sujet_VCCP = df_band_Pxx_sujet_VCCP.drop(columns=['cond'])
 
-        df_band_Pxx_sujet_protocol['C'] = df_band_Pxx_sujet_protocol['C'].replace({'c' : 'o'})
+        df_band_Pxx_sujet_attention['sujet'] = [sujet] * df_band_Pxx_sujet_attention.shape[0]
+        df_band_Pxx_sujet_HV['sujet'] = [sujet] * df_band_Pxx_sujet_HV.shape[0]
+        df_band_Pxx_sujet_VCCP['sujet'] = [sujet] * df_band_Pxx_sujet_VCCP.shape[0]
+
+        #### calibrate for different protocols
+        df_band_Pxx_sujet_VCCP['C'] = df_band_Pxx_sujet_VCCP['C'].replace({'c' : 'o'})
+        df_band_Pxx_sujet_attention['cond'] = df_band_Pxx_sujet_attention['cond'].replace({'AoRoCo' : 'CB'})
 
         #### export
         path_export_df = os.path.join(path_precompute, 'EXPORT_DF', 'patient_wise', 'Pxx')
 
         df_band_Pxx_sujet_attention.to_excel(os.path.join(path_export_df, f"{sujet}_df_Pxx_{band}_attention_R.xlsx"))
         df_band_Pxx_sujet_HV.to_excel(os.path.join(path_export_df, f"{sujet}_df_Pxx_{band}_HV_R.xlsx"))
-        df_band_Pxx_sujet_protocol.to_excel(os.path.join(path_export_df, f"{sujet}_df_Pxx_{band}_protocol_R.xlsx"))
+        df_band_Pxx_sujet_VCCP.to_excel(os.path.join(path_export_df, f"{sujet}_df_Pxx_{band}_VCCP_R.xlsx"))
+
+
+
+
+#sujet = sujet_list[0]
+def export_Pxx_reg_df_sujet(sujet):
+
+    #### config
+    sel_vec_rf_metric_scaled = ['sujet', 'cycle', 'A_relabel', 'R_relabel', 'C_relabel', 'cond',
+       'A_scaled', 'R_scaled', 'C_scaled']
+
+    #band = 'theta'
+    for band in freq_band_dict:
+
+        print(band)
+        
+        #### load
+        chanlist, _, _, localist = get_chanlist_localist(sujet)
+        path_load_Pxx = os.path.join(path_precompute, 'Pxx')
+        path_load_rf_scaled = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+        
+        _xr_raw = xr.open_dataarray(os.path.join(path_load_Pxx, f"{sujet}_xr_Pxx_RAW.nc")).sel(band=band).rename({'phase' : 'phase_cycle'})
+        _xr_relabel = xr.open_dataarray(os.path.join(path_load_Pxx, f"{sujet}_xr_Pxx_RELABEL.nc")).sel(band=band).rename({'phase' : 'phase_cycle'})
+
+        #### generate df
+        df_band_Pxx_sujet_raw = _xr_raw.to_dataframe().reset_index()
+        df_band_Pxx_sujet_relabel = _xr_relabel.to_dataframe().reset_index()
+        
+        #### clean
+        nan_exclude_vec = ~df_band_Pxx_sujet_raw['Pxx'].isna()
+        df_band_Pxx_sujet_raw = df_band_Pxx_sujet_raw[nan_exclude_vec]
+        df_band_Pxx_sujet_raw = df_band_Pxx_sujet_raw.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
+
+        nan_exclude_vec = ~df_band_Pxx_sujet_relabel['Pxx'].isna()
+        df_band_Pxx_sujet_relabel = df_band_Pxx_sujet_relabel[nan_exclude_vec]
+        df_band_Pxx_sujet_relabel = df_band_Pxx_sujet_relabel.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
+
+        #### prepare cond
+        df_band_Pxx_sujet_attention = df_band_Pxx_sujet_raw.query(f"cond in ['RB', 'AoRoCo']")
+        df_band_Pxx_sujet_attention['cond'] = df_band_Pxx_sujet_attention['cond'].replace({'AoRoCo' : 'CB'})
+        df_band_Pxx_sujet_VCCP = df_band_Pxx_sujet_relabel
+
+        #### load Pxx and rf scaled
+        rf_SD_scaled_VCCP = pd.read_excel(os.path.join(path_load_rf_scaled, f"{sujet}_df_scaled_VCCP.xlsx")).query(f"cond_relabel != 'excluded'")
+        rf_SD_scaled_RB = pd.read_excel(os.path.join(path_load_rf_scaled, f"{sujet}_df_scaled_RB.xlsx"))
+
+        #### index identification VCCP
+        rf_SD_scaled_VCCP = rf_SD_scaled_VCCP.sort_values(['cond_relabel', 'trial']).reset_index(drop=True)
+
+        cycle_i_vec = []
+        cycle_count = 0
+
+        for row_i, row_val in rf_SD_scaled_VCCP.iterrows():
+
+            if row_i != 0:
+                cond_row = row_val['cond_relabel']
+                if cond_row == cond_prev:
+                    cycle_count += 1
+                else:
+                    cycle_count = 0
+            cycle_i_vec.append(cycle_count)
+            cond_prev = row_val['cond_relabel']
+
+        rf_SD_scaled_VCCP['cycle'] = cycle_i_vec
+
+        verif_count_scaled = rf_SD_scaled_VCCP.groupby('cond_relabel').count().reset_index(names='cond_relabel')[['cond_relabel', 'cycle']]
+        verif_count_df = df_band_Pxx_sujet_VCCP.query(f"phase_cycle == 'inspi' and ROI == '{ROI_short_list[0]}'").groupby('cond').count().reset_index(names='cond_relabel')[['cond_relabel', 'cycle']]
+
+        if ~(verif_count_scaled == verif_count_df).values.all():
+            raise ValueError(f"NOT THE SAME NUMBER OF CYCLES")
+
+        rf_SD_scaled_VCCP = rf_SD_scaled_VCCP.drop(columns=['cond']).rename(columns={'cond_relabel' : 'cond'})
+        rf_SD_scaled_VCCP = rf_SD_scaled_VCCP[sel_vec_rf_metric_scaled]
+
+        #### prepare attention
+        rf_SD_scaled_attention = rf_SD_scaled_RB.query(f"cond in ['RB', 'AoRoCo']")
+        rf_SD_scaled_attention['cond'] = rf_SD_scaled_attention['cond'].replace({'AoRoCo' : 'CB'})
+        rf_SD_scaled_attention = rf_SD_scaled_attention[sel_vec_rf_metric_scaled]
+
+        #### merge
+        df_reg_VCCP = pd.merge(df_band_Pxx_sujet_VCCP, rf_SD_scaled_VCCP, on=['sujet', 'cond', 'cycle'], how='left')
+        df_reg_attention = pd.merge(df_band_Pxx_sujet_attention, rf_SD_scaled_attention, on=['sujet', 'cond', 'cycle'], how='left')
+
+        #### calibrate for different protocols
+        df_reg_VCCP['C_relabel'] = df_reg_VCCP['C_relabel'].replace({'c' : 'o'})
+
+        #### melt
+        col_melt = ['A_scaled', 'R_scaled', 'C_scaled']
+        df_reg_VCCP = pd.melt(df_reg_VCCP, id_vars=[col for col in df_reg_VCCP.columns if col not in col_melt], value_vars=col_melt, var_name='factor', value_name='val_scaled')
+        df_reg_VCCP['factor'] = df_reg_VCCP['factor'].replace({'A_scaled' : 'A', 'R_scaled' : 'R', 'C_scaled' : 'C'})
+
+        df_reg_attention = pd.melt(df_reg_attention, id_vars=[col for col in df_reg_attention.columns if col not in col_melt], value_vars=col_melt, var_name='factor', value_name='val_scaled')
+        df_reg_attention['factor'] = df_reg_attention['factor'].replace({'A_scaled' : 'A', 'R_scaled' : 'R', 'C_scaled' : 'C'})
+
+        #### export
+        path_export_df = os.path.join(path_precompute, 'EXPORT_DF', 'patient_wise', 'Pxx')
+
+        df_reg_attention.to_excel(os.path.join(path_export_df, f"{sujet}_df_reg_Pxx_{band}_attention_R.xlsx"))
+        df_reg_VCCP.to_excel(os.path.join(path_export_df, f"{sujet}_df_reg_Pxx_{band}_VCCP_R.xlsx"))
+
+
+
+
+#sujet = sujet_list[0]
+def export_Cxy_cond_df_sujet(sujet):
+        
+    #### load
+    path_load_Cxy = os.path.join(path_precompute, 'Cxy')
+
+    chanlist, _, _, localist = get_chanlist_localist(sujet)
+    _xr_Cxy = xr.open_dataarray(os.path.join(path_load_Cxy, f"{sujet}_Cxy.nc"))
+
+    ### extract Cxy around respi
+    respfeature = get_respfeatures(sujet)
+
+    trial_list = get_alltrials_sujet(sujet)
+
+    resp_med_allcond = {}
+
+    #cond = conditions[-1]
+    for cond in conditions:
+
+        trial_list_cond = [trial for trial in trial_list if trial.find(cond) != -1]
+
+        _resp_med_cond = []
+
+        for trial_i, trial in enumerate(trial_list_cond):
+
+            _respfeature_trial = respfeature.query(f"cond == '{cond}' and trial == {trial_i+1}")
+            _resp_med_cond.append(_respfeature_trial['cycle_freq'].median())
+
+        resp_med_allcond[cond] = np.median(_resp_med_cond)
+
+    data_Cxy_med = []
+    hzCxy = _xr_Cxy['freq'].values
+
+    for cond in conditions:
+
+        sel_vec_hzCxy = (hzCxy < (resp_med_allcond[cond] + Cxy_extraction_range)) & ((resp_med_allcond[cond] - Cxy_extraction_range) < hzCxy) 
+        data_Cxy_med.append(_xr_Cxy.sel(cond=cond, freq=sel_vec_hzCxy).median('freq').values)
+
+    data_Cxy_med = np.stack(data_Cxy_med)
+
+    xr_coords = {'cond' : conditions, 'chan' : chanlist, 'ROI' : ('chan', localist['loca'].values)}
+    _xr_Cxy_med = xr.DataArray(data_Cxy_med, dims=['cond', 'chan'], coords=xr_coords) 
+
+    #### generate df
+    df_Cxy_sujet_raw = _xr_Cxy_med.to_dataframe(name='Cxy').reset_index()
+    
+    #### clean
+    df_Cxy_sujet = df_Cxy_sujet_raw.query(f"ROI in {ROI_short_list}").reset_index(drop=True)
+
+    #### prepare cond
+    df_Cxy_sujet_attention = df_Cxy_sujet.query(f"cond in ['RB', 'AoRoCo']")
+    df_Cxy_sujet_HV = df_Cxy_sujet.query(f"cond in ['RB', 'HV']")
+    df_Cxy_sujet_protocol = df_Cxy_sujet.query(f"cond not in ['RB', 'HV']")
+
+    A_cond, R_cond, C_cond = [], [], []
+    for row_i, row_val in df_Cxy_sujet_protocol.iterrows():
+
+        A_cond.append(row_val['cond'][1])
+        R_cond.append(row_val['cond'][3])
+        C_cond.append(row_val['cond'][5])
+
+    df_Cxy_sujet_protocol['A'], df_Cxy_sujet_protocol['R'], df_Cxy_sujet_protocol['C'] = A_cond, R_cond, C_cond
+    df_Cxy_sujet_protocol = df_Cxy_sujet_protocol.drop(columns=['cond'])
+
+    df_Cxy_sujet_attention['sujet'] = [sujet] * df_Cxy_sujet_attention.shape[0]
+    df_Cxy_sujet_HV['sujet'] = [sujet] * df_Cxy_sujet_HV.shape[0]
+    df_Cxy_sujet_protocol['sujet'] = [sujet] * df_Cxy_sujet_protocol.shape[0]
+
+    #### calibrate for different protocols
+    df_Cxy_sujet_protocol['C'] = df_Cxy_sujet_protocol['C'].replace({'c' : 'o'})
+    df_Cxy_sujet_attention['cond'] = df_Cxy_sujet_attention['cond'].replace({'AoRoCo' : 'CB'})
+
+    #### export
+    path_export_df = os.path.join(path_precompute, 'EXPORT_DF', 'patient_wise', 'Cxy')
+
+    df_Cxy_sujet_attention.to_excel(os.path.join(path_export_df, f"{sujet}_df_Cxy_attention_R.xlsx"))
+    df_Cxy_sujet_HV.to_excel(os.path.join(path_export_df, f"{sujet}_df_Cxy_HV_R.xlsx"))
+    df_Cxy_sujet_protocol.to_excel(os.path.join(path_export_df, f"{sujet}_df_Cxy_protocol_R.xlsx"))
 
 
 
@@ -824,7 +1017,12 @@ if __name__ == '__main__':
 
     for sujet in sujet_list:
 
-        export_Pxx_df_sujet(sujet)
+        export_Pxx_cond_df_sujet(sujet)
+        export_Cxy_cond_df_sujet(sujet)
+
+
+
+
 
     export_Pxx_df()
     get_reg_allsujet()
