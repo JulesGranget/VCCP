@@ -722,40 +722,94 @@ def export_final_respfeatures(sujet):
     respfeature_final = respfeature_final[col_sel_vec]
     respfeature_final.to_excel(os.path.join(path_export, f"respfeature_allcond_FINAL.xlsx"))
 
-    ######## scaling ########
+
+
+
+
+def export_df_scaled_sujet(sujet):
+
+    #### config
+    path_export = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+
+    #### load
+    respfeature = get_respfeatures(sujet)
 
     #### extract ref
-    _rf_baseline_VCCP = respfeature_final.query(f"cond == 'AoRoCo'")
-    _rf_baseline_RB = respfeature_final.query(f"cond == 'RB'")
-    A_VCCP_SD, R_VCCP_SD, C_VCCP_SD = _rf_baseline_VCCP['total_amplitude'].std(), _rf_baseline_VCCP['cycle_freq'].std(), _rf_baseline_VCCP['etCO2'].std() 
-    A_RB_SD, R_RB_SD, C_RB_SD = _rf_baseline_RB['total_amplitude'].std(), _rf_baseline_RB['cycle_freq'].std(), _rf_baseline_RB['etCO2'].std() 
+    _rf_baseline_VCCP = respfeature.query(f"cond == 'AoRoCo'")
+    _rf_baseline_RB = respfeature.query(f"cond == 'RB'")
+
+    corresp_rf_metric_factor = {'A' : 'total_amplitude', 'R' : 'cycle_freq', 'C' : 'etCO2'}
+    zscore_param_dict = {'RB' : {}, 'VCCP' : {}}
+
+    for _cond in zscore_param_dict:
+
+        if _cond == 'RB':
+            _df = _rf_baseline_RB
+        elif _cond == 'VCCP':
+            _df = _rf_baseline_VCCP
+
+        for factor in corresp_rf_metric_factor:
+
+            x = _df[corresp_rf_metric_factor[factor]]
+            zscore_param_dict[_cond][factor] = [x.median(), np.median(np.abs(x - x.median()))]
+
+    if debug:
+
+        rf_metric_plot = ['total_amplitude', 'cycle_freq', 'etCO2']
+
+        for _rf_metric in rf_metric_plot:
+
+            plt.hist(_rf_baseline_RB[_rf_metric], bins=50, alpha=0.7)
+            plt.hist(respfeature.query(f"cond not in ['RB', 'AoRoCo', 'HV']")[_rf_metric], bins=50, alpha=0.7)
+            plt.title(_rf_metric)
+            plt.show()
+
+            plt.hist(_rf_baseline_VCCP[_rf_metric], bins=50, alpha=0.7)
+            plt.hist(respfeature.query(f"cond not in ['RB', 'AoRoCo', 'HV']")[_rf_metric], bins=50, alpha=0.7)
+            plt.title(_rf_metric)
+            plt.show()
     
     #### get rf_scaled
-    rf_SD_scaled_VCCP = respfeature_final.copy()
-    rf_SD_scaled_RB = respfeature_final.copy()
+    rf_rscore_VCCP = respfeature.copy()
+    rf_rscore_RB = respfeature.copy()
 
-    df_list = [rf_SD_scaled_VCCP, rf_SD_scaled_RB]
+    df_list = [rf_rscore_VCCP, rf_rscore_RB]
     df_type = ['VCCP', 'RB']
     df_scaled = []
 
     for _df_i, _df in enumerate(df_list):
-        
-        if df_type[_df_i] == 'VCCP':
-            _A_baseline, _R_baseline, _C_baseline = A_VCCP_SD, R_VCCP_SD, C_VCCP_SD
-        else:
-            _A_baseline, _R_baseline, _C_baseline = A_RB_SD, R_RB_SD, C_RB_SD
+
+        for factor in corresp_rf_metric_factor:
+
+            _med, _mad = zscore_param_dict[df_type[_df_i]][factor]
     
-        _df['A_scaled'] = _df['total_amplitude'] / _A_baseline
-        _df['R_scaled'] = _df['cycle_freq'] / _R_baseline
-        _df['C_scaled'] = _df['etCO2'] / _C_baseline
+            x = _df[corresp_rf_metric_factor[factor]]
+            _rscore = (x - _med) * 0.6745 / _mad
+            _df[f"{factor}_scaled"] = _rscore
 
         df_scaled.append(_df)
 
-    rf_SD_scaled_VCCP_export, rf_SD_scaled_RB_export = df_scaled[0], df_scaled[1]
+    rf_rscore_VCCP_export, rf_rscore_RB_export = df_scaled[0], df_scaled[1]
+
+    if debug:
+
+        rf_metric_plot = ['A_scaled', 'R_scaled', 'C_scaled']
+
+        for _rf_metric in rf_metric_plot:
+
+            plt.hist(rf_rscore_VCCP_export.query(f"cond == 'AoRoCo'")[_rf_metric], bins=50, alpha=0.7)
+            plt.hist(rf_rscore_VCCP_export.query(f"cond not in ['RB', 'AoRoCo', 'HV']")[_rf_metric], bins=50, alpha=0.7)
+            plt.title(f"VCCP {_rf_metric}")
+            plt.show()
+
+            plt.hist(rf_rscore_RB_export.query(f"cond == 'RB'")[_rf_metric], bins=50, alpha=0.7)
+            plt.hist(rf_rscore_RB_export.query(f"cond == 'HV'")[_rf_metric], bins=50, alpha=0.7)
+            plt.title(f"RB {_rf_metric}")
+            plt.show()
 
     #### export
-    rf_SD_scaled_VCCP_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_VCCP.xlsx"))
-    rf_SD_scaled_RB_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_RB.xlsx"))
+    rf_rscore_VCCP_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_VCCP.xlsx"))
+    rf_rscore_RB_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_RB.xlsx"))
 
 
 
@@ -776,7 +830,7 @@ if __name__ == '__main__':
         extract_respfeatures_and_mean_figures(sujet)
         export_MAIN_cond_relabeling_fig(sujet)
         export_final_respfeatures(sujet)
-        export_rf_cond_scaling(sujet)
+        export_df_scaled_sujet(sujet)
 
 
 
