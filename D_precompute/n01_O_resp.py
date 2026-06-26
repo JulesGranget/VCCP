@@ -345,7 +345,7 @@ def extract_respfeatures_and_mean_figures(sujet):
 
 
 #sujet = sujet_list[0]
-def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
+def export_MAIN_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
     #### load respfeatures
     respfeatures_allcond = get_respfeatures_raw(sujet)
@@ -496,9 +496,11 @@ def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
     respfeatures_allcond_labeled['R_relabel'] = respfeatures_allcond_labeled['R_relabel'].replace({False : 'o', True : '-'})
     respfeatures_allcond_labeled['C_relabel'] = respfeatures_allcond_labeled['C_relabel'].replace({False : 'o', True : '-'})
 
+    respfeatures_allcond_labeled = respfeatures_allcond_labeled.rename(columns={'cycle' : 'cycle_raw'})
+
     #### export respfeatures relabelled
     path_export_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    respfeatures_allcond_labeled.to_excel(os.path.join(path_export_respfeatures, f"respfeature_allcond_relabel.xlsx"))
+    respfeatures_allcond_labeled.to_excel(os.path.join(path_export_respfeatures, f"respfeature_allcond_MAIN.xlsx"))
 
     ######## PLOT ########
 
@@ -663,29 +665,74 @@ def export_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
 
 
 
+def export_final_respfeatures(sujet):
 
+    #### config
+    col_sel_vec = ['sujet', 'cond', 'cycle', 'cond_raw', 'cycle_raw', 'A', 'R', 'C', 'inspi_index', 'expi_index', 'next_inspi_index',
+       'inspi_time', 'expi_time', 'next_inspi_time', 'cycle_duration',
+       'inspi_duration', 'expi_duration', 'cycle_freq', 'cycle_ratio',
+       'inspi_volume', 'expi_volume', 'total_amplitude', 'inspi_amplitude',
+       'expi_amplitude', 'inspi_peak_index', 'expi_peak_index',
+       'inspi_peak_time', 'expi_peak_time', 'total_volume', 'etCO2']
+    
+    path_export = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
 
+    #### load
+    path_load_respfeatures_MAIN = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
+    respfeatures_allcond_MAIN = pd.read_excel(os.path.join(path_load_respfeatures_MAIN, f"respfeature_allcond_MAIN.xlsx")).drop(columns=['Unnamed: 0'])
 
+    #### select good cycles
+    respfeatures_allcond_MAIN_good_cycle = respfeatures_allcond_MAIN.query(f"select == 1")
 
-################################
-######## SCALE ########
-################################
+    #### extract RB & HV
+    respfeatures_allcond_RBHV = respfeatures_allcond_MAIN_good_cycle.query(f"cond in ['RB', 'HV']")
+    respfeatures_allcond_RBHV['cycle'] = respfeatures_allcond_RBHV['cycle_raw']
+    respfeatures_allcond_RBHV['cond_raw'] = respfeatures_allcond_RBHV['cond']
+    respfeatures_allcond_RBHV = respfeatures_allcond_RBHV.drop(columns=['trial', 'cond_relabel'])
+    respfeatures_allcond_RBHV = respfeatures_allcond_RBHV.rename(columns={'A_relabel' : 'A', 'R_relabel' : 'R', 'C_relabel' : 'C'}) 
+    respfeatures_allcond_RBHV = respfeatures_allcond_RBHV[col_sel_vec]
 
+    #### construct relabel clean
+    respfeatures_allcond_relabel = respfeatures_allcond_MAIN_good_cycle.query(f"cond not in ['RB', 'HV']")
+    respfeatures_allcond_relabel = respfeatures_allcond_relabel.drop(columns=['trial'])
+    respfeatures_allcond_relabel = respfeatures_allcond_relabel.rename(columns={'cond' : 'cond_raw'})
+    respfeatures_allcond_relabel = respfeatures_allcond_relabel.rename(columns={'cond_relabel' : 'cond', 'A_relabel' : 'A', 'R_relabel' : 'R', 'C_relabel' : 'C'})
+    respfeatures_allcond_relabel = respfeatures_allcond_relabel.sort_values('cond').reset_index(drop=True)
 
-def export_rf_cond_scaling(sujet):
+    cycle_i_vec = []
+    cycle_count = 0
 
-    #### extract respfeatures
-    respfeature = get_respfeatures_relabel_raw(sujet)
+    for row_i, row_val in respfeatures_allcond_relabel.iterrows():
+
+        if row_i != 0:
+            cond_row = row_val['cond']
+            if cond_row == cond_prev:
+                cycle_count += 1
+            else:
+                cycle_count = 0
+        cycle_i_vec.append(cycle_count)
+        cond_prev = row_val['cond']
+
+    respfeatures_allcond_relabel['cycle'] = cycle_i_vec
+
+    #### concat
+    respfeature_final = pd.concat([respfeatures_allcond_RBHV, respfeatures_allcond_relabel])
+
+    #### export
+    respfeature_final = respfeature_final[col_sel_vec]
+    respfeature_final.to_excel(os.path.join(path_export, f"respfeature_allcond_FINAL.xlsx"))
+
+    ######## scaling ########
 
     #### extract ref
-    _rf_baseline_VCCP = respfeature.query(f"cond_relabel == 'AoRoCo'")
-    _rf_baseline_RB = respfeature.query(f"cond == 'RB'")
+    _rf_baseline_VCCP = respfeature_final.query(f"cond == 'AoRoCo'")
+    _rf_baseline_RB = respfeature_final.query(f"cond == 'RB'")
     A_VCCP_SD, R_VCCP_SD, C_VCCP_SD = _rf_baseline_VCCP['total_amplitude'].std(), _rf_baseline_VCCP['cycle_freq'].std(), _rf_baseline_VCCP['etCO2'].std() 
     A_RB_SD, R_RB_SD, C_RB_SD = _rf_baseline_RB['total_amplitude'].std(), _rf_baseline_RB['cycle_freq'].std(), _rf_baseline_RB['etCO2'].std() 
     
     #### get rf_scaled
-    rf_SD_scaled_VCCP = respfeature.copy()
-    rf_SD_scaled_RB = respfeature.copy()
+    rf_SD_scaled_VCCP = respfeature_final.copy()
+    rf_SD_scaled_RB = respfeature_final.copy()
 
     df_list = [rf_SD_scaled_VCCP, rf_SD_scaled_RB]
     df_type = ['VCCP', 'RB']
@@ -707,9 +754,11 @@ def export_rf_cond_scaling(sujet):
     rf_SD_scaled_VCCP_export, rf_SD_scaled_RB_export = df_scaled[0], df_scaled[1]
 
     #### export
-    path_export = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    rf_SD_scaled_VCCP_export.to_excel(os.path.join(path_export, f"{sujet}_df_scaled_VCCP.xlsx"))
-    rf_SD_scaled_RB_export.to_excel(os.path.join(path_export, f"{sujet}_df_scaled_RB.xlsx"))
+    rf_SD_scaled_VCCP_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_VCCP.xlsx"))
+    rf_SD_scaled_RB_export.to_excel(os.path.join(path_export, f"respfeatures_scaled_RB.xlsx"))
+
+
+
 
 
 
@@ -725,7 +774,8 @@ if __name__ == '__main__':
     for sujet in sujet_list:
 
         extract_respfeatures_and_mean_figures(sujet)
-        export_cond_relabeling_fig(sujet)
+        export_MAIN_cond_relabeling_fig(sujet)
+        export_final_respfeatures(sujet)
         export_rf_cond_scaling(sujet)
 
 

@@ -1,13 +1,12 @@
 
 
-import joblib
-import plotly
 
 from A_config.n01_O_config_params import *
 from A_config.n02_O_config_analysis_functions import *
 from A_config.n03_O_patient_info import *
 
 
+import joblib
 
 
 
@@ -33,7 +32,7 @@ def extract_stretch_TF_raw(sujet, norm_param):
     #cond = conditions[3]
     for cond in conditions:
 
-        if os.path.exists(os.path.join(path_export_TF, f"{sujet}_{cond}_tf_stretch_cycle_cleaned_RAW.nc")):
+        if os.path.exists(os.path.join(path_export_TF, f"{sujet}_{cond}_tf_stretch_RAW.nc")):
             print(f'{sujet} {cond} ALREADY COMPUTED', flush=True)
             return
         else:
@@ -203,25 +202,7 @@ def extract_stretch_TF_raw(sujet, norm_param):
                 plt.pcolormesh(np.median(tf_allchan_stretch[0], axis=[0]))
                 plt.show()
 
-            #### sel good cycles
-            sel_vec_good_cycles = respfeature_trial_raw.query(f"select == 1")['cycle'].values - respfeature_trial_raw['cycle'].values[0] 
-            tf_allchan_stretch_filtered = tf_allchan_stretch[:,sel_vec_good_cycles]
-            resp_stretch_filtered = resp_stretch[sel_vec_good_cycles]
-            CO2_stretch_filtered = CO2_stretch[sel_vec_good_cycles]
-
-            if debug:
-                for cycle_i in range(resp_stretch_filtered.shape[0]):
-                    plt.plot(resp_stretch_filtered[cycle_i])
-                plt.show()
-
-                for cycle_i in range(CO2_stretch_filtered.shape[0]):
-                    plt.plot(CO2_stretch_filtered[cycle_i])
-                plt.show()
-
-                plt.pcolormesh(np.median(tf_allchan_stretch_filtered[0], axis=[0]))
-                plt.show()
-
-            tf_stretch_cond.append(tf_allchan_stretch_filtered)
+            tf_stretch_cond.append(tf_allchan_stretch)
 
         #### concat
         tf_stretch_cond = np.concat(tf_stretch_cond, axis=1)
@@ -230,7 +211,7 @@ def extract_stretch_TF_raw(sujet, norm_param):
         print(f'SAVE TF STRETCH {sujet} {cond}', flush=True)
         dict_xr_tf_coords = {'chan' : chanlist, 'cycle' : np.arange(tf_stretch_cond.shape[1]), 'freq' : frex, 'phase' : np.arange(stretch_point_TF)} 
         xr_tf_stretch_export = xr.DataArray(tf_stretch_cond, dims=dict_xr_tf_coords.keys(), coords=dict_xr_tf_coords)
-        xr_tf_stretch_export.to_netcdf(os.path.join(path_export_TF, f"{sujet}_{cond}_tf_stretch_cycle_cleaned_RAW.nc"))
+        xr_tf_stretch_export.to_netcdf(os.path.join(path_export_TF, f"{sujet}_{cond}_tf_stretch_RAW.nc"))
 
         #### remove
         os.remove(os.path.join(path_memmap, f'memmap_{sujet}_{trial}_tf_conv.npy'))
@@ -246,53 +227,44 @@ def extract_stretch_TF_relabel(sujet):
 
     #### config
     path_load_TF = os.path.join(path_precompute, 'TF', sujet)
-    chanlist, _, _, localist = get_chanlist_localist(sujet)
 
     #### load
-    respfeatures_relabel_raw = get_respfeatures_relabel_raw(sujet)
-    respfeatures_relabel_raw = respfeatures_relabel_raw.query(f"select == 1")
-    respfeatures_relabel_raw = respfeatures_relabel_raw.sort_values(['cond', 'cycle']).reset_index(drop=True)
-
-    cycle_i_vec = []
-    cycle_count = 0
-
-    for row_i, row_val in respfeatures_relabel_raw.iterrows():
-
-        if row_i != 0:
-            cond_row = row_val['cond']
-            if cond_row == cond_prev:
-                cycle_count += 1
-            else:
-                cycle_count = 0
-        cycle_i_vec.append(cycle_count)
-        cond_prev = row_val['cond']
-
-    respfeatures_relabel_raw['cycle'] = cycle_i_vec
+    respfeatures = get_respfeatures(sujet)
 
     #### extract cond VCCP
-    for cond in conditions_VCCP:
+    for cond in conditions:
 
         print(f"RELABEL {cond}")
 
-        _rf = respfeatures_relabel_raw.query(f"cond_relabel == '{cond}'")
-        _sel_params = _rf[['cond', 'cycle']]
+        _rf = respfeatures.query(f"cond == '{cond}'")
+        _sel_params_raw = _rf[['cond_raw', 'cycle_raw']]
 
+        #### load required cond_raw
+        cond_raw_cycle_tf = {}
+
+        for cond_target in _sel_params_raw['cond_raw'].unique():
+
+            cond_raw_cycle_tf[cond_target] = xr.load_dataarray(os.path.join(path_load_TF, f"{sujet}_{cond_target}_tf_stretch_RAW.nc"))
+
+        #### load good cycles
         cond_relabel_cycles = []
 
-        for cond_target in _sel_params['cond'].unique():
+        for row_i, row_val in _sel_params_raw.iterrows():
             
-            _tf_stretch = xr.load_dataarray(os.path.join(path_load_TF, f"{sujet}_{cond_target}_tf_stretch_cycle_cleaned.nc"))
-            _sel_cycle_cond_relabel = _sel_params.query(f"cond == '{cond_target}'")['cycle'].values
+            _cond, _cycle_i = row_val['cond_raw'], row_val['cycle_raw'] 
+            cond_relabel_cycles.append(cond_raw_cycle_tf[_cond].sel(cycle=_cycle_i))
 
-            __tf_stretch_cond_relabel = _tf_stretch[:,_sel_cycle_cond_relabel].values
-            cond_relabel_cycles.append(__tf_stretch_cond_relabel)
+        xr_tf_stretch_export = xr.concat(cond_relabel_cycles, dim='cycle').transpose('chan', 'cycle', 'freq', 'phase')
 
-        tf_stretch_cond_relabel = np.concat(cond_relabel_cycles, axis=1)
+        if debug:
+
+            xr_tf_stretch_export.isel(chan=0).median('cycle').plot.pcolormesh()
+            plt.show()
+
+        xr_tf_stretch_export['cycle'] = np.arange(_sel_params_raw.shape[0])
 
         #### export
-        dict_xr_tf_coords = {'chan' : chanlist, 'cycle' : np.arange(tf_stretch_cond_relabel.shape[1]), 'freq' : frex, 'phase' : np.arange(stretch_point_TF)} 
-        xr_tf_stretch_export = xr.DataArray(tf_stretch_cond_relabel, dims=dict_xr_tf_coords.keys(), coords=dict_xr_tf_coords)
-        xr_tf_stretch_export.to_netcdf(os.path.join(path_load_TF, f"{sujet}_{cond}_tf_stretch_cycle_cleaned_RELABEL.nc"))
+        xr_tf_stretch_export.to_netcdf(os.path.join(path_load_TF, f"{sujet}_{cond}_tf_stretch_RELABEL.nc"))
 
 
 
@@ -303,14 +275,14 @@ def extract_stretch_TF_relabel(sujet):
 ################################
 
 
-def extract_power_RAW(sujet):
+def extract_power(sujet):
 
     print("EXTRACT POWER", flush=True)
 
     #### verify if already computed
     path_export_Pxx = os.path.join(path_precompute, 'Pxx')
 
-    if os.path.exists(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx_RAW.nc')):
+    if os.path.exists(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx.nc')):
         print(f'{sujet} ALREADY COMPUTED', flush=True)
         return
 
@@ -338,7 +310,7 @@ def extract_power_RAW(sujet):
         print(f"{cond}")
 
         #### load
-        xr_tf = xr.open_dataarray(os.path.join(path_load_precompute_tf, f"{sujet}_{cond}_tf_stretch_cycle_cleaned_RAW.nc"))
+        xr_tf = xr.open_dataarray(os.path.join(path_load_precompute_tf, f"{sujet}_{cond}_tf_stretch_RELABEL.nc"))
 
         #### extract
         Pxx_cond = np.zeros((1, xr_tf['chan'].shape[0], len(bands), len(phases), xr_tf['cycle'].shape[0]), dtype=np.float32)
@@ -387,98 +359,7 @@ def extract_power_RAW(sujet):
 
     #### SAVE
     print('SAVE EXTRACT PXX', flush=True)
-    da_Pxx.to_netcdf(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx_RAW.nc')) 
-
-    print('done', flush=True)
-
-
-
-
-def extract_power_RELABEL(sujet):
-
-    print("EXTRACT POWER", flush=True)
-
-    #### verify if already computed
-    path_export_Pxx = os.path.join(path_precompute, 'Pxx')
-
-    if os.path.exists(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx_RELABEL.nc')):
-        print(f'{sujet} ALREADY COMPUTED', flush=True)
-        return
-
-    #### params
-    chanlist, _, _, localist = get_chanlist_localist(sujet)
-
-    idx = np.arange(stretch_point_TF)
-    inspi_sel = idx <= stretch_point_TF / 2
-    expi_sel  = idx >  stretch_point_TF / 2
-
-    bands = list(freq_band_dict.keys())
-    phases = ["inspi", "expi"]
-
-    band_frex_sel = {band: (frex >= freq[0]) & (frex <= freq[-1])
-                    for band, freq in freq_band_dict.items()}
-    
-    #### load
-    path_load_precompute_tf = os.path.join(path_precompute, 'TF', sujet)
-
-    #### extract Pxx
-    xr_Pxx = []
-
-    for cond in conditions_VCCP:
-
-        print(f"{cond}")
-
-        #### load
-        xr_tf = xr.open_dataarray(os.path.join(path_load_precompute_tf, f"{sujet}_{cond}_tf_stretch_cycle_cleaned_RELABEL.nc"))
-
-        #### extract
-        Pxx_cond = np.zeros((1, xr_tf['chan'].shape[0], len(bands), len(phases), xr_tf['cycle'].shape[0]), dtype=np.float32)
-
-        for chan_i, chan_name in enumerate(chanlist):
-
-            ncycle = xr_tf['cycle'].shape[0]
-
-            for cycle_i in range(ncycle):
-
-                for band_i, (band, frex_sel) in enumerate(band_frex_sel.items()):
-
-                    _tf = xr_tf.sel(chan=chan_name, cycle=cycle_i, freq=frex[frex_sel]).values
-
-                    pxx_inspi = np.median(_tf[:, inspi_sel])
-                    pxx_expi  = np.median(_tf[:, expi_sel])
-
-                    Pxx_cond[0, chan_i, band_i, 0, cycle_i] = pxx_inspi
-                    Pxx_cond[0, chan_i, band_i, 1, cycle_i] = pxx_expi
-
-        xr_Pxx.append(Pxx_cond)
-
-    #### construct xr
-    max_cycle = np.array([_Pxx.shape[-1] for _Pxx in xr_Pxx]).max()
-    xr_Pxx_data = np.full((1, len(conditions_VCCP), xr_tf['chan'].shape[0], len(bands), len(phases), max_cycle), np.nan, dtype=np.float32)
-
-    for cond_i, cond in enumerate(conditions_VCCP):
-        
-        cond_max_cycle = xr_Pxx[cond_i].shape[-1]
-        xr_Pxx_data[0,cond_i,:,:,:,:cond_max_cycle] = xr_Pxx[cond_i]
-
-    da_Pxx = xr.DataArray(
-        xr_Pxx_data,
-        dims=("sujet", "cond", "chan", "band", "phase", "cycle"),
-        coords={
-            "sujet" : [sujet],
-            "cond": conditions_VCCP,
-            "chan": chanlist,
-            "band": bands,
-            "phase": phases,
-            "cycle": np.arange(max_cycle),
-            "ROI": ("chan", localist['loca'].values),   
-        },
-        name="Pxx"
-    )
-
-    #### SAVE
-    print('SAVE EXTRACT PXX', flush=True)
-    da_Pxx.to_netcdf(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx_RELABEL.nc')) 
+    da_Pxx.to_netcdf(os.path.join(path_export_Pxx, f'{sujet}_xr_Pxx.nc')) 
 
     print('done', flush=True)
 
@@ -503,8 +384,7 @@ if __name__ == '__main__':
 
         extract_stretch_TF_raw(sujet, norm_param)
         extract_stretch_TF_relabel(sujet)
-        extract_power_RAW(sujet)
-        extract_power_RELABEL(sujet)
+        extract_power(sujet)
 
 
 

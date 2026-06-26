@@ -224,48 +224,22 @@ def get_respfeatures_raw(sujet):
     return respfeature_allcond
 
 
-def get_respfeatures(sujet):
+def get_respfeatures_main(sujet):
     
     path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_RAW.xlsx")).drop(columns=['Unnamed: 0'])
-    respfeature_allcond = respfeature_allcond.query(f"select == 1")
+    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_MAIN.xlsx")).drop(columns=['Unnamed: 0'])
 
     return respfeature_allcond
 
 
-def get_respfeatures_relabel_raw(sujet):
+
+def get_respfeatures(sujet):
     
     path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    respfeature_allcond_relabel = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_relabel.xlsx")).drop(columns=['Unnamed: 0'])
+    respfeature_allcond = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_FINAL.xlsx")).drop(columns=['Unnamed: 0'])
 
-    return respfeature_allcond_relabel
+    return respfeature_allcond
 
-
-
-def get_respfeatures_relabel_cycle_cleaned(sujet):
-    
-    path_load_respfeatures = os.path.join(path_precompute, 'RESPI', 'respfeatures', sujet)
-    respfeature_allcond_relabel = pd.read_excel(os.path.join(path_load_respfeatures, f"respfeature_allcond_relabel.xlsx")).drop(columns=['Unnamed: 0'])
-    respfeature_allcond_relabel = respfeature_allcond_relabel.query(f"select == 1")
-    respfeature_allcond_relabel = respfeature_allcond_relabel.sort_values(['cond', 'cycle']).reset_index(drop=True)
-
-    cycle_i_vec = []
-    cycle_count = 0
-
-    for row_i, row_val in respfeature_allcond_relabel.iterrows():
-
-        if row_i != 0:
-            cond_row = row_val['cond']
-            if cond_row == cond_prev:
-                cycle_count += 1
-            else:
-                cycle_count = 0
-        cycle_i_vec.append(cycle_count)
-        cond_prev = row_val['cond']
-
-    respfeature_allcond_relabel['cycle'] = cycle_i_vec
-
-    return respfeature_allcond_relabel
 
 
 
