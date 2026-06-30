@@ -508,9 +508,12 @@ def export_MAIN_cond_relabeling_fig(sujet, calibrating_param='dynamic'):
     path_export_label = os.path.join(path_results, 'respi', 'relabel')
 
     #### export relabel modification plot
+    sel_vec = respfeatures_allcond_labeled['cond'].isin(['RB', 'HV'])
+    df_plot = respfeatures_allcond_labeled.copy()
+    df_plot['cond_relabel'][sel_vec] = df_plot['cond'][sel_vec]
     df_plot = pd.concat([
-            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond'], 'type': 'raw'}),
-            pd.DataFrame({'cond': respfeatures_allcond_labeled['cond_relabel'], 'type': 'relabel'})
+            pd.DataFrame({'cond': df_plot['cond'], 'type': 'raw'}),
+            pd.DataFrame({'cond': df_plot['cond_relabel'], 'type': 'relabel'})
         ])
 
     fig_count = plt.figure(figsize=(10, 6))
